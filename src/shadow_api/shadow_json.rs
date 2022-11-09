@@ -1,7 +1,7 @@
 use std::cell::{RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::str;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug};
 
@@ -29,7 +29,7 @@ pub struct ShadowJsonData {
     /*
         A map where key represents the name of the value, and value indicates how the data should be extracted from the current node
     */
-    pub values: Option<HashMap<String, ShadowJsonValueSource>>
+    pub values: Option<IndexMap<String, ShadowJsonValueSource>>
 }
 
 #[derive(Default, Serialize, Deserialize, Debug)]

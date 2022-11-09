@@ -1,5 +1,7 @@
 use core::fmt;
-use std::{cell::RefCell, rc::Rc, collections::HashMap};
+use std::{cell::RefCell, rc::Rc};
+
+use indexmap::IndexMap;
 
 // ShadowData is a minimalistic tree structure representing json value which contains only Objects, Arrays or Strings, wrapped in Rc<RefCell<T>>
 // The reason we don't use serde::json for this is that while serde::json is able to deserialize into Rc (through a feature), RefCells are not supported
@@ -7,7 +9,7 @@ use std::{cell::RefCell, rc::Rc, collections::HashMap};
 pub enum ShadowData {
     String(Rc<RefCell<String>>),
     Array(Vec<Rc<RefCell<ShadowData>>>),
-    Object(HashMap<String, Rc<RefCell<ShadowData>>>)
+    Object(IndexMap<String, Rc<RefCell<ShadowData>>>)
 }
 
 impl Default for ShadowData {
@@ -58,7 +60,7 @@ impl ShadowData {
         return ShadowData::Array(Vec::new());
     }
     pub fn new_object() -> Self {
-        return ShadowData::Object(HashMap::new());
+        return ShadowData::Object(IndexMap::new());
     }
     pub fn is_string(&self) -> bool {
         return match &self {
@@ -96,13 +98,13 @@ impl ShadowData {
             _ => false
         }
     }
-    pub fn as_object(&self) -> Option<&HashMap<String, Rc<RefCell<Self>>>> {
+    pub fn as_object(&self) -> Option<&IndexMap<String, Rc<RefCell<Self>>>> {
         return match &self {
             Self::Object(s) => Some(s),
             _ => None
         }
     }
-    pub fn as_object_mut(&mut self) -> Option<&mut HashMap<String, Rc<RefCell<Self>>>> {
+    pub fn as_object_mut(&mut self) -> Option<&mut IndexMap<String, Rc<RefCell<Self>>>> {
         return match self {
             Self::Object(s) => Some(s),
             _ => None
@@ -122,7 +124,7 @@ impl ShadowData {
         }
     }
     // Merges map2 into map1
-    pub fn merge(map1: &mut HashMap<String, Rc<RefCell<ShadowData>>>, map2: &mut HashMap<String, Rc<RefCell<ShadowData>>>) {
+    pub fn merge(map1: &mut IndexMap<String, Rc<RefCell<ShadowData>>>, map2: &mut IndexMap<String, Rc<RefCell<ShadowData>>>) {
         for (subkey, map2_subval) in map2 {
             let map2_rc = Rc::clone(map2_subval);
             let map1_subval_opt = map1.get_mut(subkey);

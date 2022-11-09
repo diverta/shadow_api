@@ -11,10 +11,10 @@
 //! It is recommended that the steps 1,2 and 3 are done while waiting for the backend response (using `Fastly::Request::send_async` for example) - especially if ShadowJson is fetched through another API.
 
 use std::cell::{RefCell};
-use std::collections::HashMap;
 use std::io::{Write};
 use std::rc::Rc;
 use std::borrow::{Cow};
+use indexmap::IndexMap;
 use lol_html::html_content::{ContentType, Element, TextChunk};
 use lol_html::{ElementContentHandlers, Selector, HtmlRewriter, Settings};
 
@@ -222,7 +222,7 @@ impl ShadowApi<'_> {
             ech.push((
                 Cow::Owned(current_selector.parse().unwrap()),
                 ElementContentHandlers::default().element(move |el| {
-                    Self::lol_element_content_handler(el, Rc::clone(&eh_json_def), Rc::clone(&eh_data), Rc::clone(&eh_errors))
+                    Self::element_content_handler(el, Rc::clone(&eh_json_def), Rc::clone(&eh_data), Rc::clone(&eh_errors))
                 })
             ));
         }
@@ -245,7 +245,7 @@ impl ShadowApi<'_> {
         selector_stack.pop();
     }
 
-    fn lol_element_content_handler(
+    fn element_content_handler(
         el: &mut Element,
         json_def: Rc<ShadowJson>,
         new_data: Rc<RefCell<ShadowData>>,
@@ -288,7 +288,7 @@ impl ShadowApi<'_> {
                         .attributes()
                         .iter()
                         .map(|a| (a.name(), a.value()))
-                        .collect::<HashMap<String, String>>();
+                        .collect::<IndexMap<String, String>>();
                     for (key, value) in values.iter() {
                         match value {
                             ShadowJsonValueSource::Attribute(attr_name) => {
@@ -299,7 +299,7 @@ impl ShadowApi<'_> {
                                 }
                             },
                             ShadowJsonValueSource::Contents => {
-                                // This is handled by TextHandler
+                                // This is handled by text_content_handler
                             },
                             ShadowJsonValueSource::Value => {
                                 // Fetch the current value from the different form elements
@@ -314,7 +314,7 @@ impl ShadowApi<'_> {
                                             let mut new_data_m = new_data.borrow_mut();
                                             match input_type.as_str() {
                                                 "radio" => {
-                                                    if attrs.get("checked").unwrap_or(&String::from("")) == "checked" {
+                                                    if attrs.get("checked").is_some() {
                                                         // For radio/checkbox, we only consider the box which is checked. Make sure def json contains all items
                                                         new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(attrs.get("value").unwrap_or(&String::from("")).to_owned())));
                                                     } else if new_data_m.get(key).is_none() {
@@ -389,7 +389,7 @@ impl ShadowApi<'_> {
                                     }
                                 },
                                 _ => {
-                                    // Handled by ElementHandler
+                                    // Handled by element_content_handler
                                 }
                             }
                         }
@@ -426,7 +426,7 @@ impl ShadowApi<'_> {
         ));
     }
 
-    pub fn process_html<W, R>(&self, writer: &mut W, reader: R, errors: Rc<RefCell<Vec<String>>>)
+    pub fn process_html<W, R>(&self, writer: &mut W, chunk_iter: &mut R, errors: Rc<RefCell<Vec<String>>>)
     where
         W: Write,
         R: Iterator<Item = Result<Vec<u8>, std::io::Error>>
@@ -445,7 +445,7 @@ impl ShadowApi<'_> {
             }
         );
 
-        for chunk in reader {
+        for chunk in chunk_iter {
             if let Ok(chunk_data) = chunk {
                 if let Err(e) = rewriter.write(&chunk_data) {
                     let mut errors_m = errors.borrow_mut();
