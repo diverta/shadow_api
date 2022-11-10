@@ -326,7 +326,7 @@ impl ShadowApi<'_> {
                                                     if new_data_m.get(key).is_none() {
                                                         new_data_m.set(key, ShadowData::wrap(ShadowData::new_array()));
                                                     }
-                                                    if attrs.get("checked").unwrap_or(&String::from("")) == "checked" {
+                                                    if attrs.get("checked").is_some() {
                                                         // For radio/checkbox, we only consider the box which is checked. Make sure def json contains all items
                                                         if let Some(arr) = new_data_m.get(key) {
                                                             let mut arr_borrowed = arr.borrow_mut();

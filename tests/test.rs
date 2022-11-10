@@ -18,6 +18,11 @@ fn test() {
         <input type="radio" name="radio_key" value="radio_val_unchecked" />
         <input type="radio" name="radio_key" value="radio_val_checked" checked />
       </div>
+      <div class="chkbox">
+        <input type="checkbox" name="checkbox_key" value="1" checked />
+        <input type="checkbox" name="checkbox_key" value="2" />
+        <input type="checkbox" name="checkbox_key" value="3" checked />
+      </div>
       <select name="select_key">
         <option name="select_opt1" value="select_val1">Select Value 1</option>
         <option name="select_opt2" value="select_val2" selected="selected">Select Value 2</option>
@@ -67,6 +72,14 @@ let json_def: Rc<Vec<Rc<ShadowJson>>> = Rc::new(Vec::from([Rc::new(ShadowJson::p
                     "data": {
                         "values": {
                             "radio_key": {"source": "Value"}
+                        }
+                    }
+                },
+                {
+                    "s": "input[name=\"checkbox_key\"][checked]",
+                    "data": {
+                        "values": {
+                            "checkbox_key": {"source": "Value"}
                         }
                     }
                 },
@@ -124,6 +137,11 @@ let json_def: Rc<Vec<Rc<ShadowJson>>> = Rc::new(Vec::from([Rc::new(ShadowJson::p
         <input type="radio" name="radio_key" value="radio_val_unchecked" />
         <input type="radio" name="radio_key" value="radio_val_checked" checked />
       </div>
+      <div class="chkbox">
+        <input type="checkbox" name="checkbox_key" value="1" checked />
+        <input type="checkbox" name="checkbox_key" value="2" />
+        <input type="checkbox" name="checkbox_key" value="3" checked />
+      </div>
       <select name="select_key">
         <option name="select_opt1" value="select_val1">Select Value 1</option>
         <option name="select_opt2" value="select_val2" selected="selected">Select Value 2</option>
@@ -135,7 +153,7 @@ let json_def: Rc<Vec<Rc<ShadowJson>>> = Rc::new(Vec::from([Rc::new(ShadowJson::p
     <div>Insert Before</div><div id="el_anchor"><div>Prepend</div>Anchor<div>Append</div></div><div>Insert After</div>
   </div>
   
-<script>var my_data = {"top_link":{"url":"https://top.link","name":"TopLink"},"formdata":{"text_key":"text_val","radio_key":"radio_val_checked","select_key":"select_val2"}};</script></body>
+<script>var my_data = {"top_link":{"url":"https://top.link","name":"TopLink"},"formdata":{"text_key":"text_val","radio_key":"radio_val_checked","checkbox_key":["1","3"],"select_key":"select_val2"}};</script></body>
 </html>"##;
 
     assert_eq!(processed_html,expected_html_output);
