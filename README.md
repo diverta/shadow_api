@@ -113,9 +113,10 @@ Now, let's apply the ShadowApi. The following code uses Fastly::Response (exampl
             shadow_api_o.parse(json_def, Rc::clone(&errors)); // This crawls ShadowJson and builds all element and text content handlers for LOLHTML.
 
             let mut resp = resp.wait()?; // Only now start waiting
-            let mut client_body = resp.clone_without_body().stream_to_client(); // Begin the stream back. Cloning because we will still need to read the body, but resp is moved here
+            let mut resp_body = resp.take_body();
+            let mut client_body = resp.stream_to_client(); // Begin the stream back
 
-            shadow_api_o.process_html(&mut client_body, &mut resp.read_body_chunks(CHUNK_SIZE), Rc::clone(&errors)); // This reads the chunk iterator over the body, and applies the processing chunk by chunk
+            shadow_api_o.process_html(&mut client_body, &mut resp_body.read_chunks(CHUNK_SIZE), Rc::clone(&errors)); // This reads the chunk iterator over the body, and applies the processing chunk by chunk
 
             drop(client_body); // Response is sent, cleanup
 ```
