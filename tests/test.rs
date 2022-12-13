@@ -9,7 +9,7 @@ fn test() {
 <head>
 </head>
 <body>
-  <a href="https://top.link">TopLink</a>
+  <a class="top_link" href="https://top.link">TopLink</a>
   <div class="to_delete">First item to be deleted</div>
   <div id="first">
     <form>
@@ -34,6 +34,20 @@ fn test() {
     <div id="el_anchor">Anchor</div>
   </div>
   <div class="to_delete">Third item to be deleted</div>
+  <div id="collections">
+    <div class="coll1">
+        <a href="coll1_link1">Coll1 Title1</a>
+    </div>
+    <div class="coll1">
+        <a href="coll1_link2">Coll1 Title2</a>
+    </div>
+    <div class="coll2">
+        <a href="coll2_link1">Coll2 Title1</a>
+    </div>
+    <div class="coll2">
+        <a href="coll2_link2">Coll2 Title2</a>
+    </div>
+  </div>
 </body>
 </html>"##;
 
@@ -43,7 +57,7 @@ let json_def: Rc<Vec<Rc<ShadowJson>>> = Rc::new(Vec::from([Rc::new(ShadowJson::p
     "s": "body",
     "sub": [
         {
-            "s": "a",
+            "s": "a.top_link",
             "data": {
                 "path": "top_link",
                 "values": {
@@ -102,7 +116,38 @@ let json_def: Rc<Vec<Rc<ShadowJson>>> = Rc::new(Vec::from([Rc::new(ShadowJson::p
         },
         {
             "s": ".to_delete",
+            "data": {
+                "path": "to_delete.",
+                "values": {
+                    "contents": {"source": "Contents"}
+                }
+            },
             "delete": true
+        },
+        {
+            "s": ".coll1 > a",
+            "data": {
+                "path": "coll1.",
+                "values": {
+                    "href": {"source": "Attribute", "name": "href"},
+                    "name": {"source": "Contents"}
+                }
+            }
+        },
+        {
+            "s": ".coll2",
+            "sub": [
+                {
+                    "s": "a",
+                    "data": {
+                        "path": "coll2.",
+                        "values": {
+                            "href": {"source": "Attribute", "name": "href"},
+                            "name": {"source": "Contents"}
+                        }
+                    }
+                }
+            ]
         }
     ]
 }
@@ -156,6 +201,9 @@ let json_def: Rc<Vec<Rc<ShadowJson>>> = Rc::new(Vec::from([Rc::new(ShadowJson::p
 <script>var my_data = {"top_link":{"url":"https://top.link","name":"TopLink"},"formdata":{"text_key":"text_val","radio_key":"radio_val_checked","checkbox_key":["1","3"],"select_key":"select_val2"}};</script></body>
 </html>"##;
 
+
+{ println!("Errors: {:?}", errors); }
+{ println!("DATA: {}", shadow_api_o.data.borrow()); }
     assert_eq!(processed_html,expected_html_output);
     assert_eq!(Rc::clone(&errors).borrow().len(), 0);
 }
