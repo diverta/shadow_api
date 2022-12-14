@@ -91,7 +91,7 @@ let json_def: Rc<Vec<Rc<ShadowJson>>> = Rc::new(Vec::from([Rc::new(ShadowJson::p
 `errors` is here to help with data validation, in case the Json you constructed contains mistakes. You may log it for debugging. It is deserialized into ShadowJson struct, check if for options. Hopefully it is self-explanatory enough : a tree structure representing the DOM structure : 
 - `s` : Nested selectors are only selecting elements under their parent, as one might expect. 
 - `data` : Optional, add it when you need to collect the data from the element under this selector
-- `data.path` : Optional, specify a path to organize resulting data. If the path ends with a single dot `.`, then the elements will be appended to an array.
+- `data.path` : Optional, specify a path to organize resulting data. If the path ends with a single dot `.`, then the elements will be appended to an array (useful for selectors targeting multiple elements, for example to collect contents of all divs with a specific class into an array)
 - `data.values` : Specify the key for data storage, and where to fetch it (under `source`). The 3 possible options are demonstrated in the above demo code : `Attribute` (requires `name`) for element attribute, `Contents` for text contents of the element, and `Value` which is a shortcut for some `input` types (although same results could be achieved with `{"source": "Attribute", "name":"value"}`)
 - `delete` removes the element
 - `hide` applies `style="display:none"` to the element

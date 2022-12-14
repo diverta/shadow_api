@@ -12,7 +12,7 @@
 
 use std::cell::{RefCell};
 use std::io::{Write};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::borrow::{Cow};
 use indexmap::IndexMap;
 use lol_html::html_content::{ContentType, Element, TextChunk};
@@ -61,7 +61,14 @@ impl ShadowApi<'_> {
         let mut selector_stack: Vec<String> = Vec::with_capacity(10);
         let mut ech_borrowed = self.ech.borrow_mut();
         let ech = ech_borrowed.as_mut();
-        Self::parse_rec(json_def, errors, Rc::clone(&self.data), ech, &mut selector_stack);
+        Self::parse_rec(
+            json_def,
+            errors,
+            Rc::clone(&self.data),
+            Weak::new(),
+            ech,
+            &mut selector_stack
+        );
         Self::data_content_handler(Rc::clone(&self.data), Rc::clone(&self.data_formatter), ech); // This will create a special handler to inject data at the end
     }
 
@@ -69,11 +76,19 @@ impl ShadowApi<'_> {
         json_def: Rc<Vec<Rc<ShadowJson>>>,
         errors: Rc<RefCell<Vec<String>>>,
         data: Rc<RefCell<ShadowData>>,
+        parent_array: Weak<RefCell<ShadowData>>,
         ech: &mut Vec<(Cow<Selector>, ElementContentHandlers)>,
         selector_stack: &mut Vec<String> // To build full selector
     ) {
         for el in json_def.as_ref() {
-            Self::parse_one(Rc::clone(&el), Rc::clone(&errors), Rc::clone(&data), ech, selector_stack);
+            Self::parse_one(
+                Rc::clone(&el),
+                Rc::clone(&errors),
+                Rc::clone(&data),
+                Weak::clone(&parent_array),
+                ech,
+                selector_stack
+            );
         }
     }
 
@@ -81,6 +96,7 @@ impl ShadowApi<'_> {
         json_def: Rc<ShadowJson>,
         errors_rc: Rc<RefCell<Vec<String>>>,
         data: Rc<RefCell<ShadowData>>,
+        mut parent_array: Weak<RefCell<ShadowData>>,
         ech: &mut Vec<(Cow<Selector>, ElementContentHandlers)>,
         selector_stack: &mut Vec<String> // To build full selector
     ) {
@@ -140,12 +156,10 @@ impl ShadowApi<'_> {
                                     array_el
                                 }
                             };
-                            /*
+                            parent_array = Rc::downgrade(&data_array); // Creating weak reference to parent array
                             let new_data = ShadowData::wrap(ShadowData::new_object());
                             data_array.borrow_mut().push(Rc::clone(&new_data));
-                            next_data = Rc::clone(&new_data);
-                            */
-                            next_data = data_array;
+                            next_data = Rc::clone(&new_data); // Next data is now pointing to the first (empty) object of the array
                             break;
                         } else {
                             if let Some(temp_data_existing) = temp_data.get(word) {
@@ -157,6 +171,7 @@ impl ShadowApi<'_> {
                                 temp_data.set(word, Rc::clone(&new_data));
                                 next_data = Rc::clone(&new_data);
                             }
+                            parent_array = Weak::new(); // No parent array => weak reference to nothing
                         }
                     } else {
                         // Assigning intermediate nesting
@@ -222,10 +237,17 @@ impl ShadowApi<'_> {
             let eh_errors = Rc::clone(&errors_rc);
             let eh_json_def = Rc::clone(&json_def);
             let eh_data = Rc::clone(&next_data);
+            let parent_array_cloned = Weak::clone(&parent_array);
             ech.push((
                 Cow::Owned(current_selector.parse().unwrap()),
                 ElementContentHandlers::default().element(move |el| {
-                    Self::element_content_handler(el, Rc::clone(&eh_json_def), Rc::clone(&eh_data), Rc::clone(&eh_errors))
+                    Self::element_content_handler(
+                        el,
+                        Rc::clone(&eh_json_def),
+                        Rc::clone(&eh_data),
+                        Weak::clone(&parent_array_cloned),
+                        Rc::clone(&eh_errors)
+                    )
                 })
             ));
         }
@@ -233,16 +255,30 @@ impl ShadowApi<'_> {
             let th_errors = Rc::clone(&errors_rc);
             let th_json_def = Rc::clone(&json_def);
             let th_data = Rc::clone(&next_data);
+            let parent_array_cloned = Weak::clone(&parent_array);
             ech.push((
                 Cow::Owned(current_selector.parse().unwrap()),
                 ElementContentHandlers::default().text(move |el| {
-                    Self::text_content_handler(el, Rc::clone(&th_json_def), Rc::clone(&th_data), Rc::clone(&th_errors))
+                    Self::text_content_handler(
+                        el,
+                        Rc::clone(&th_json_def),
+                        Rc::clone(&th_data),
+                        Weak::clone(&parent_array_cloned),
+                        Rc::clone(&th_errors)
+                    )
                 })
             ));
         }
 
         if let Some(sub) = &json_def.sub {
-            ShadowApi::parse_rec(Rc::clone(&sub), Rc::clone(&errors_rc), Rc::clone(&next_data), ech, selector_stack);
+            ShadowApi::parse_rec(
+                Rc::clone(&sub),
+                Rc::clone(&errors_rc),
+                Rc::clone(&next_data),
+                parent_array,
+                ech,
+                selector_stack
+            );
         }
 
         selector_stack.pop();
@@ -251,7 +287,8 @@ impl ShadowApi<'_> {
     fn element_content_handler(
         el: &mut Element,
         json_def: Rc<ShadowJson>,
-        new_data_array_or_object: Rc<RefCell<ShadowData>>,
+        mut new_data_init: Rc<RefCell<ShadowData>>,
+        parent_array: Weak<RefCell<ShadowData>>,
         errors: Rc<RefCell<Vec<String>>>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if json_def.hide.unwrap_or(false) {
@@ -284,71 +321,71 @@ impl ShadowApi<'_> {
         if let Some(data_def) = &json_def.data {
             if let Some(values) = &data_def.values {
                 if !values.is_empty() {
-                    if let Some(new_data) = ShadowData::force_object(Rc::clone(&new_data_array_or_object)) {
-                        let attrs = el
-                            .attributes()
-                            .iter()
-                            .map(|a| (a.name(), a.value()))
-                            .collect::<IndexMap<String, String>>();
-                        for (key, value) in values.iter() {
-                            match value {
-                                ShadowJsonValueSource::Attribute(attr_name) => {
-                                    if attr_name.len() == 0 { continue; }
-                                    if let Some(attr_value) = attrs.get(attr_name) {
-                                        let mut new_data_m = new_data.borrow_mut();
-                                        new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(attr_value.clone())));
-                                    }
-                                },
-                                ShadowJsonValueSource::Contents => {
-                                    // This is handled by text_content_handler
-                                },
-                                ShadowJsonValueSource::Value => {
-                                    // Fetch the current value from the different form elements
-                                    match el.tag_name().as_str() {
-                                        /* LOLHTML does not allow to operate on children, so to provide "select" shortcut we would need to create a new handler its children
-                                        * However whether the element is select or not is unknown before parsing the element itself, and it is too late to add
-                                        * a new handler at that point. So we cannot provide "select" shortcut. Instead use directly "select > option[selected=selected]"
-                                        "select" => {},
-                                        */
-                                        "input" => {
-                                            if let Some(input_type) = attrs.get("type") {
-                                                let mut new_data_m = new_data.borrow_mut();
-                                                match input_type.as_str() {
-                                                    "radio" => {
-                                                        if attrs.get("checked").is_some() {
-                                                            // For radio/checkbox, we only consider the box which is checked. Make sure def json contains all items
-                                                            new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(attrs.get("value").unwrap_or(&String::from("")).to_owned())));
-                                                        } else if new_data_m.get(key).is_none() {
-                                                            // Init
-                                                            new_data_m.set(key, ShadowData::wrap(ShadowData::new_string("".to_string())));
-                                                        }
-                                                    }
-                                                    "checkbox" => {
-                                                        if new_data_m.get(key).is_none() {
-                                                            new_data_m.set(key, ShadowData::wrap(ShadowData::new_array()));
-                                                        }
-                                                        if attrs.get("checked").is_some() {
-                                                            // For radio/checkbox, we only consider the box which is checked. Make sure def json contains all items
-                                                            if let Some(arr) = new_data_m.get(key) {
-                                                                let mut arr_borrowed = arr.borrow_mut();
-                                                                arr_borrowed.push(ShadowData::wrap(ShadowData::new_string(attrs.get("value").unwrap_or(&String::from("")).to_owned())));
-                                                            }
-                                                        }
-                                                    }
-                                                    _ => {
-                                                        new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(attrs.get("value").unwrap_or(&String::from("").to_string()).to_owned())));
+                    let attrs = el
+                        .attributes()
+                        .iter()
+                        .map(|a| (a.name(), a.value()))
+                        .collect::<IndexMap<String, String>>();
+                    for (key, value) in values.iter() {
+                        match value {
+                            ShadowJsonValueSource::Attribute(attr_name) => {
+                                if attr_name.len() == 0 { continue; }
+                                Self::prepare_array_element(Rc::clone(&new_data_init), Weak::clone(&parent_array), key);
+                                if let Some(attr_value) = attrs.get(attr_name) {
+                                    let mut new_data_m = new_data_init.borrow_mut();
+                                    new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(attr_value.clone())));
+                                }
+                            },
+                            ShadowJsonValueSource::Contents => {
+                                // This is handled by text_content_handler
+                            },
+                            ShadowJsonValueSource::Value => {
+                                Self::prepare_array_element(Rc::clone(&new_data_init), Weak::clone(&parent_array), key);
+                                // Fetch the current value from the different form elements
+                                match el.tag_name().as_str() {
+                                    /* LOLHTML does not allow to operate on children, so to provide "select" shortcut we would need to create a new handler its children
+                                    * However whether the element is select or not is unknown before parsing the element itself, and it is too late to add
+                                    * a new handler at that point. So we cannot provide "select" shortcut. Instead use directly "select > option[selected=selected]"
+                                    "select" => {},
+                                    */
+                                    "input" => {
+                                        if let Some(input_type) = attrs.get("type") {
+                                            let mut new_data_m = new_data_init.borrow_mut();
+                                            match input_type.as_str() {
+                                                "radio" => {
+                                                    if attrs.get("checked").is_some() {
+                                                        // For radio/checkbox, we only consider the box which is checked. Make sure def json contains all items
+                                                        new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(attrs.get("value").unwrap_or(&String::from("")).to_owned())));
+                                                    } else if new_data_m.get(key).is_none() {
+                                                        // Init
+                                                        new_data_m.set(key, ShadowData::wrap(ShadowData::new_string("".to_string())));
                                                     }
                                                 }
+                                                "checkbox" => {
+                                                    if new_data_m.get(key).is_none() {
+                                                        new_data_m.set(key, ShadowData::wrap(ShadowData::new_array()));
+                                                    }
+                                                    if attrs.get("checked").is_some() {
+                                                        // For radio/checkbox, we only consider the box which is checked. Make sure def json contains all items
+                                                        if let Some(arr) = new_data_m.get(key) {
+                                                            let mut arr_borrowed = arr.borrow_mut();
+                                                            arr_borrowed.push(ShadowData::wrap(ShadowData::new_string(attrs.get("value").unwrap_or(&String::from("")).to_owned())));
+                                                        }
+                                                    }
+                                                }
+                                                _ => {
+                                                    new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(attrs.get("value").unwrap_or(&String::from("").to_string()).to_owned())));
+                                                }
                                             }
-                                        },
-                                        "option" => {
-                                            let mut new_data_m = new_data.borrow_mut();
-                                            new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(attrs.get("value").unwrap_or(&String::from("").to_string()).to_owned())));
-                                        },
-                                        _ => {
-                                            let mut errors_m = errors.borrow_mut();
-                                            errors_m.push(format!("Unimplemented input: '{}' (TODO)",el.tag_name().as_str()));
                                         }
+                                    },
+                                    "option" => {
+                                        let mut new_data_m = new_data_init.borrow_mut();
+                                        new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(attrs.get("value").unwrap_or(&String::from("").to_string()).to_owned())));
+                                    },
+                                    _ => {
+                                        let mut errors_m = errors.borrow_mut();
+                                        errors_m.push(format!("Unimplemented input: '{}' (TODO)",el.tag_name().as_str()));
                                     }
                                 }
                             }
@@ -368,10 +405,39 @@ impl ShadowApi<'_> {
         Ok(())
     }
 
+    fn prepare_array_element(
+        current_el: Rc<RefCell<ShadowData>>,
+        parent_array: Weak<RefCell<ShadowData>>,
+        key: &String
+    ) {
+        if parent_array.strong_count() > 0 {
+            // The parent array exists, meaning that new_data_init is an element of the array.
+            // We need to decide if we should modify the current element, or to append a new one (and repoint new_data_init to it)
+            // This decision will be based on the existence of a value with the same key - if yet, it is *most likely* a new selector match
+            let create_new_el: bool = {
+                let new_data_m = current_el.borrow_mut();
+                if let Some(new_data_obj) = new_data_m.as_object() {
+                    // This should always be the case
+                    new_data_obj.contains_key(key)
+                } else {
+                    false
+                }
+            };
+            if create_new_el {
+                if let Some(parent) = parent_array.upgrade() {
+                    // Since strong_count was not zero, upgrade should always yield Some
+                    *current_el.borrow_mut() = ShadowData::new_object();
+                    parent.borrow_mut().push(Rc::clone(&current_el));
+                }
+            }
+        }
+    }
+
     fn text_content_handler(
         el: &mut TextChunk,
         json_def: Rc<ShadowJson>,
-        data: Rc<RefCell<ShadowData>>,
+        new_data_init: Rc<RefCell<ShadowData>>,
+        parent_array: Weak<RefCell<ShadowData>>,
         _errors: Rc<RefCell<Vec<String>>>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         static mut ALL_REPLACE_TEXT_BUFFER: String = String::new();
@@ -385,18 +451,17 @@ impl ShadowApi<'_> {
             if let Some(data_def) = &json_def.data {
                 if let Some(values) = &data_def.values {
                     if !values.is_empty() {
-                        if let Some(new_data) = ShadowData::force_object(Rc::clone(&data)) {
-                            for (key, value) in values.iter() {
-                                match value {
-                                    ShadowJsonValueSource::Contents => {
-                                            let mut new_data_m = new_data.borrow_mut();
-                                            unsafe { // Mutable static => unsafe in multi-threaded env. But in our case, it is safe because we don't do multithreading
-                                                new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(ALL_REPLACE_TEXT_BUFFER.clone())));
-                                            }
-                                    },
-                                    _ => {
-                                        // Handled by element_content_handler
-                                    }
+                        for (key, value) in values.iter() {
+                            match value {
+                                ShadowJsonValueSource::Contents => {
+                                        Self::prepare_array_element(Rc::clone(&new_data_init), Weak::clone(&parent_array), key);
+                                        let mut new_data_m = new_data_init.borrow_mut();
+                                        unsafe { // Mutable static => unsafe in multi-threaded env. But in our case, it is safe because we don't do multithreading
+                                            new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(ALL_REPLACE_TEXT_BUFFER.clone())));
+                                        }
+                                },
+                                _ => {
+                                    // Handled by element_content_handler
                                 }
                             }
                         }
