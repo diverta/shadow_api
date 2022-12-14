@@ -205,4 +205,21 @@ impl ShadowData {
             ShadowData::Object(_) => panic!("ShadowData::push cannot be applied on Object subtype. Self : {:#?} Val: {:#?}", self, val),
         }
     }
+    // Force conversion of data_orig into object, by pushing a new element into the array if it is one
+    pub fn force_object(data_orig: Rc<RefCell<ShadowData>>) -> Option<Rc<RefCell<ShadowData>>> {
+        let rc_data_orig = Rc::clone(&data_orig);
+        let mut borrowed = rc_data_orig.borrow_mut();
+        match *borrowed {
+            ShadowData::String(_) => {
+                panic!("ShadowData::get_map_mut.force_object is neither object nor array. Program bug");
+            },
+            ShadowData::Array(ref mut data) => {
+                println!("FORCE OBJECT");
+                let new_data = ShadowData::wrap(ShadowData::new_object());
+                data.push(Rc::clone(&new_data));
+                Some(new_data)
+            },
+            ShadowData::Object(_) => None, // Perfect as-is
+        }
+    }
 }
