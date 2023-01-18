@@ -180,7 +180,16 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([Rc::new(RefC
         format!("<script>var my_data = {};</script>", data)
     })));
 
-    shadow_api_o.parse(json_def, Rc::clone(&errors));
+    shadow_api_o.parse(Rc::clone(&json_def), Rc::clone(&errors));
+
+    {
+        // Testing ShadowJson string transform
+        let first_shadowjson = Rc::clone(Rc::clone(&json_def).get(0).unwrap());
+        let mut first_shadowjson = first_shadowjson.borrow_mut();
+        first_shadowjson.transform_strings(&mut |s: &mut String| {
+            *s = s.replace("Append", "AppendModified");
+        });
+    }
 
     let mut output = BufWriter::new(Vec::new());
 
@@ -220,7 +229,7 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([Rc::new(RefC
     
   </div>
   <div id="second">
-    <div>Insert Before</div><div id="el_anchor"><div>Prepend</div>Anchor<div>Append</div></div><div>Insert After</div>
+    <div>Insert Before</div><div id="el_anchor"><div>Prepend</div>Anchor<div>AppendModified</div></div><div>Insert After</div>
   </div>
   
   <div id="collections">
