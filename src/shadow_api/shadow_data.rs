@@ -221,7 +221,7 @@ impl ShadowData {
             ShadowData::Object(_) => None, // Perfect as-is
         }
     }
-    pub fn transform_strings(&mut self, f: fn(&mut String)) {
+    pub fn transform_strings(&mut self, f: &dyn Fn(&mut String)) {
         match self {
             ShadowData::String(s) => {
                 f(&mut s.borrow_mut());
