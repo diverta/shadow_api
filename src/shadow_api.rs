@@ -28,7 +28,8 @@ use shadow_json::ShadowJsonValueSource;
 pub struct ShadowApi<'a> {
     pub data: Rc<RefCell<ShadowData>>,
     data_formatter: Rc<Box<dyn Fn(String) -> String>>,
-    ech: RefCell<Vec<(Cow<'a, Selector>, ElementContentHandlers<'a>)>>
+    ech: RefCell<Vec<(Cow<'a, Selector>, ElementContentHandlers<'a>)>>,
+    content_buffer: Rc<RefCell<String>>
 }
 
 impl ShadowApi<'_> {
@@ -36,7 +37,8 @@ impl ShadowApi<'_> {
         ShadowApi {
             data: ShadowData::wrap(ShadowData::new_object()),
             data_formatter: Rc::new(Box::new(Self::default_data_formatter)),
-            ech: RefCell::new(Vec::new())
+            ech: RefCell::new(Vec::new()),
+            content_buffer: Rc::new(RefCell::new(String::new()))
         }
     }
 
@@ -55,7 +57,7 @@ impl ShadowApi<'_> {
     // errors : A container to write errors to
     pub fn parse(
         &self,
-        json_def: Rc<Vec<Rc<ShadowJson>>>,
+        json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>>,
         errors: Rc<RefCell<Vec<String>>>
     ) {
         let mut selector_stack: Vec<String> = Vec::with_capacity(10);
@@ -67,18 +69,20 @@ impl ShadowApi<'_> {
             Rc::clone(&self.data),
             Weak::new(),
             ech,
-            &mut selector_stack
+            &mut selector_stack,
+            Rc::clone(&self.content_buffer)
         );
         Self::data_content_handler(Rc::clone(&self.data), Rc::clone(&self.data_formatter), ech); // This will create a special handler to inject data at the end
     }
 
     fn parse_rec(
-        json_def: Rc<Vec<Rc<ShadowJson>>>,
+        json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>>,
         errors: Rc<RefCell<Vec<String>>>,
         data: Rc<RefCell<ShadowData>>,
         parent_array: Weak<RefCell<ShadowData>>,
         ech: &mut Vec<(Cow<Selector>, ElementContentHandlers)>,
-        selector_stack: &mut Vec<String> // To build full selector
+        selector_stack: &mut Vec<String>, // To build full selector
+        content_buffer: Rc<RefCell<String>>
     ) {
         for el in json_def.as_ref() {
             Self::parse_one(
@@ -87,30 +91,33 @@ impl ShadowApi<'_> {
                 Rc::clone(&data),
                 Weak::clone(&parent_array),
                 ech,
-                selector_stack
+                selector_stack,
+                Rc::clone(&content_buffer)
             );
         }
     }
 
     fn parse_one(
-        json_def: Rc<ShadowJson>,
+        json_def: Rc<RefCell<ShadowJson>>,
         errors_rc: Rc<RefCell<Vec<String>>>,
         data: Rc<RefCell<ShadowData>>,
         mut parent_array: Weak<RefCell<ShadowData>>,
         ech: &mut Vec<(Cow<Selector>, ElementContentHandlers)>,
-        selector_stack: &mut Vec<String> // To build full selector
+        selector_stack: &mut Vec<String>, // To build full selector
+        content_buffer: Rc<RefCell<String>>
     ) {
-        if json_def.s.as_str().len() == 0 {
+        let json_def_b = json_def.borrow();
+        if json_def_b.s.as_str().len() == 0 {
             let mut errors = errors_rc.borrow_mut();
             errors.push("Empty selector".to_string());
             return;
         }
-        selector_stack.push(json_def.s.clone());
+        selector_stack.push(json_def_b.s.clone());
         let current_selector = selector_stack.join(" "); // Since LOLHTML is not building dom tree, we need to build the absolute selector
 
         let mut next_data: Rc<RefCell<ShadowData>> = Rc::clone(&data); // Prepare a cell for next loop iteration. Path will nest it
         let path: Option<String>;
-        if let Some(data_def) = &json_def.data {
+        if let Some(data_def) = &json_def_b.data {
             path = data_def.path.clone();
 
             if let Some(mut path) = path {
@@ -190,25 +197,25 @@ impl ShadowApi<'_> {
         // Element handler function: it processes the node as an element
         let mut use_element_handler = false;
         let mut use_text_handler = false;
-        if json_def.delete.unwrap_or(false) {
+        if json_def_b.delete.unwrap_or(false) {
             use_element_handler = true;
         }
         let empty_vec = Vec::new();
-        if json_def.hide.unwrap_or(false)
-            || json_def.insert_after.as_ref().unwrap_or(&empty_vec).len() > 0
-            || json_def.insert_before.as_ref().unwrap_or(&empty_vec).len() > 0
-            || json_def.append.as_ref().unwrap_or(&empty_vec).len() > 0
-            || json_def.prepend.as_ref().unwrap_or(&empty_vec).len() > 0
+        if json_def_b.hide.unwrap_or(false)
+            || json_def_b.insert_after.as_ref().unwrap_or(&empty_vec).len() > 0
+            || json_def_b.insert_before.as_ref().unwrap_or(&empty_vec).len() > 0
+            || json_def_b.append.as_ref().unwrap_or(&empty_vec).len() > 0
+            || json_def_b.prepend.as_ref().unwrap_or(&empty_vec).len() > 0
             {
             use_element_handler = true;
         }
-        if let Some(_html_tags) = &json_def.insert_after {
+        if let Some(_html_tags) = &json_def_b.insert_after {
             use_element_handler = true;
         }
-        if let Some(_html_tags) = &json_def.insert_before {
+        if let Some(_html_tags) = &json_def_b.insert_before {
             use_element_handler = true;
         }
-        if let Some(data_def) = &json_def.data {
+        if let Some(data_def) = &json_def_b.data {
             if let Some(values) = &data_def.values {
                 if !values.is_empty() {
                     for (_key, value) in values.iter() {
@@ -256,6 +263,7 @@ impl ShadowApi<'_> {
             let th_json_def = Rc::clone(&json_def);
             let th_data = Rc::clone(&next_data);
             let parent_array_cloned = Weak::clone(&parent_array);
+            let th_content_buffer = Rc::clone(&content_buffer);
             ech.push((
                 Cow::Owned(current_selector.parse().unwrap()),
                 ElementContentHandlers::default().text(move |el| {
@@ -264,20 +272,22 @@ impl ShadowApi<'_> {
                         Rc::clone(&th_json_def),
                         Rc::clone(&th_data),
                         Weak::clone(&parent_array_cloned),
-                        Rc::clone(&th_errors)
+                        Rc::clone(&th_errors),
+                        Rc::clone(&th_content_buffer)
                     )
                 })
             ));
         }
 
-        if let Some(sub) = &json_def.sub {
+        if let Some(sub) = &json_def_b.sub {
             ShadowApi::parse_rec(
                 Rc::clone(&sub),
                 Rc::clone(&errors_rc),
                 Rc::clone(&next_data),
                 parent_array,
                 ech,
-                selector_stack
+                selector_stack,
+                Rc::clone(&content_buffer)
             );
         }
 
@@ -286,39 +296,71 @@ impl ShadowApi<'_> {
 
     fn element_content_handler(
         el: &mut Element,
-        json_def: Rc<ShadowJson>,
-        mut new_data_init: Rc<RefCell<ShadowData>>,
+        json_def: Rc<RefCell<ShadowJson>>,
+        new_data_init: Rc<RefCell<ShadowData>>,
         parent_array: Weak<RefCell<ShadowData>>,
         errors: Rc<RefCell<Vec<String>>>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if json_def.hide.unwrap_or(false) {
-            match el.get_attribute("style") {
-                Some(mut style) => style.push_str(";display: none"),
-                None => el.set_attribute("style", "display: none").unwrap_or_else(|_| {}),
-            }
-        }
-        if let Some(html_tags) = &json_def.insert_after {
+        let json_def_b = json_def.borrow();
+        let delete = json_def_b.delete.unwrap_or(false);
+
+        if let Some(html_tags) = &json_def_b.insert_after {
             for tag in html_tags {
                 el.after(tag.as_str(), ContentType::Html)
             }
         }
-        if let Some(html_tags) = &json_def.insert_before {
+        if let Some(html_tags) = &json_def_b.insert_before {
             for tag in html_tags {
                 el.before(tag.as_str(), ContentType::Html)
             }
         }
-        if let Some(html_tags) = &json_def.append {
+        if let Some(html_tags) = &json_def_b.append {
             for tag in html_tags {
                 el.append(tag.as_str(), ContentType::Html)
             }
         }
-        if let Some(html_tags) = &json_def.prepend {
+        if let Some(html_tags) = &json_def_b.prepend {
             for tag in html_tags {
                 el.prepend(tag.as_str(), ContentType::Html)
             }
         }
+
+        if !delete {
+            if json_def_b.hide.unwrap_or(false) {
+                match el.get_attribute("style") {
+                    Some(mut style) => style.push_str(";display: none"),
+                    None => el.set_attribute("style", "display: none").unwrap_or_else(|_| {}),
+                }
+            }
+            if let Some(edit) = &json_def_b.edit {
+                if let Some(attrs) = &edit.attrs {
+                    for (key, val) in attrs.iter() {
+                        match val.op.as_str() {
+                            "delete" => {
+                                el.remove_attribute(key);
+                            }
+                            "upsert" => {
+                                if let Some(value) = &val.val {
+                                    if let Err(e) = el.set_attribute(key, value.as_str()) {
+                                        let mut errors_m = errors.borrow_mut();
+                                        errors_m.push(format!("Unable to set attribute (edit.attrs.{}): {}", key, e));
+                                    }
+                                } else {
+                                    let mut errors_m = errors.borrow_mut();
+                                    errors_m.push(format!("Upsert requires val attribute (edit.attrs.{})", key));
+                                }
+                            }
+                            other => {
+                                let mut errors_m = errors.borrow_mut();
+                                errors_m.push(format!("Invalid operation (edit.attrs.{}): {}. Allowed values : delete/upsert",key, other));
+                            }
+                        }
+                    }
+                }
+            }
+        }
         
-        if let Some(data_def) = &json_def.data {
+        if let Some(data_def) = &json_def_b.data {
             if let Some(values) = &data_def.values {
                 if !values.is_empty() {
                     let attrs = el
@@ -398,7 +440,7 @@ impl ShadowApi<'_> {
                 }
             }
         }
-        if json_def.delete.unwrap_or(false) {
+        if delete {
             el.remove();
         }
 
@@ -435,30 +477,49 @@ impl ShadowApi<'_> {
 
     fn text_content_handler(
         el: &mut TextChunk,
-        json_def: Rc<ShadowJson>,
+        json_def: Rc<RefCell<ShadowJson>>,
         new_data_init: Rc<RefCell<ShadowData>>,
         parent_array: Weak<RefCell<ShadowData>>,
-        _errors: Rc<RefCell<Vec<String>>>
+        errors: Rc<RefCell<Vec<String>>>,
+        content_buffer: Rc<RefCell<String>>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        static mut ALL_REPLACE_TEXT_BUFFER: String = String::new();
-        unsafe { // Mutable static => unsafe. But in our case, it is safe because we don't do multithreading
-            ALL_REPLACE_TEXT_BUFFER.push_str(el.as_str()); // Saved chunk to buffer
-        }
+        let json_def_b = json_def.borrow();
+        let mut content_buffer_b = content_buffer.borrow_mut();
+        content_buffer_b.push_str(el.as_str()); // Saved chunk to buffer
         el.remove();
         if el.last_in_text_node() {
             // Last text chunk reached : process the buffer, send it back and reset it
             // PROCESSING BEGINS
-            if let Some(data_def) = &json_def.data {
+            if let Some(data_def) = &json_def_b.data {
                 if let Some(values) = &data_def.values {
                     if !values.is_empty() {
                         for (key, value) in values.iter() {
                             match value {
                                 ShadowJsonValueSource::Contents => {
+                                        if let Some(edit) = &json_def_b.edit {
+                                            if let Some(content) = &edit.content {
+                                                match content.op.as_str() {
+                                                    "delete" => {
+                                                        *content_buffer_b = String::new();
+                                                    }
+                                                    "upsert" => {
+                                                        if let Some(value) = &content.val {
+                                                            *content_buffer_b = value.clone();
+                                                        } else {
+                                                            let mut errors_m = errors.borrow_mut();
+                                                            errors_m.push(format!("Upsert requires val attribute (edit.attrs.{})", key));
+                                                        }
+                                                    }
+                                                    other => {
+                                                        let mut errors_m = errors.borrow_mut();
+                                                        errors_m.push(format!("Invalid operation (edit.attrs.{}): {}. Allowed values : delete/upsert",key, other));
+                                                    }
+                                                }
+                                            }
+                                        }
                                         Self::prepare_array_element(Rc::clone(&new_data_init), Weak::clone(&parent_array), key);
                                         let mut new_data_m = new_data_init.borrow_mut();
-                                        unsafe { // Mutable static => unsafe in multi-threaded env. But in our case, it is safe because we don't do multithreading
-                                            new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(ALL_REPLACE_TEXT_BUFFER.clone())));
-                                        }
+                                        new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(content_buffer_b.clone())));
                                 },
                                 _ => {
                                     // Handled by element_content_handler
@@ -469,10 +530,8 @@ impl ShadowApi<'_> {
                 }
             }
             // PROCESSING ENDS
-            unsafe { // Mutable static => unsafe. But in our case, it is safe because we don't do multithreading
-                el.replace(&ALL_REPLACE_TEXT_BUFFER, ContentType::Text);
-                ALL_REPLACE_TEXT_BUFFER.clear(); // Reset
-            }
+            el.replace(&content_buffer_b, ContentType::Text);
+            content_buffer_b.clear(); // Reset
         }
         Ok(())
     }

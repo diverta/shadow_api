@@ -9,7 +9,7 @@ fn test() {
 <head>
 </head>
 <body>
-  <a class="top_link" href="https://top.link">TopLink</a>
+  <a class="top_link" href="https://top.link" style="display:none">TopLink</a>
   <div class="to_delete">First item to be deleted</div>
   <div id="first">
     <form>
@@ -52,12 +52,27 @@ fn test() {
 </html>"##;
 
 let errors: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
-let json_def: Rc<Vec<Rc<ShadowJson>>> = Rc::new(Vec::from([Rc::new(ShadowJson::parse_str(r##"
+let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([Rc::new(RefCell::new(ShadowJson::parse_str(r##"
 {
     "s": "body",
     "sub": [
         {
             "s": "a.top_link",
+            "edit": {
+                "attrs": {
+                    "style": {
+                        "op": "delete"
+                    },
+                    "id": {
+                        "op": "upsert",
+                        "val": "123"
+                    }
+                },
+                "content": {
+                    "op": "upsert",
+                    "val": "New Top Link"
+                }
+            },
             "data": {
                 "path": "top_link",
                 "values": {
@@ -158,7 +173,7 @@ let json_def: Rc<Vec<Rc<ShadowJson>>> = Rc::new(Vec::from([Rc::new(ShadowJson::p
         }
     ]
 }
-"##, Rc::clone(&errors)))]));
+"##, Rc::clone(&errors))))]));
 
     let mut shadow_api_o = ShadowApi::new();
     shadow_api_o.set_data_formatter(Rc::new(Box::new(move |data: String| {
@@ -173,6 +188,9 @@ let json_def: Rc<Vec<Rc<ShadowJson>>> = Rc::new(Vec::from([Rc::new(ShadowJson::p
     let mut bytes = html_source.as_bytes().chunks(chunk_size).map(|c| { Ok(c.to_vec())});
     shadow_api_o.process_html(&mut output, &mut bytes, Rc::clone(&errors));
 
+    println!("Erros: {:#?}", errors);
+    assert_eq!(Rc::clone(&errors).borrow().len(), 0);
+
     let bytes = output.into_inner().unwrap_or_default();
 
     let processed_html = String::from_utf8(bytes).unwrap_or("<UTF8 ERROR>".to_string());
@@ -180,7 +198,7 @@ let json_def: Rc<Vec<Rc<ShadowJson>>> = Rc::new(Vec::from([Rc::new(ShadowJson::p
 <head>
 </head>
 <body>
-  <a class="top_link" href="https://top.link" style="display: none">TopLink</a>
+  <a class="top_link" href="https://top.link" id="123">New Top Link</a>
   
   <div id="first">
     <form>
@@ -219,9 +237,8 @@ let json_def: Rc<Vec<Rc<ShadowJson>>> = Rc::new(Vec::from([Rc::new(ShadowJson::p
         <a href="coll2_link2">Coll2 Title2</a>
     </div>
   </div>
-<script>var my_data = {"top_link":{"url":"https://top.link","name":"TopLink"},"formdata":{"text_key":"text_val","radio_key":"radio_val_checked","checkbox_key":["1","3"],"select_key":"select_val2"},"to_delete":[{"contents":"Third item to be deleted"},{"contents":"Third item to be deleted"},{"contents":"Third item to be deleted"}],"coll1":[{"href":"coll1_link2","name":"Coll1 Title2"},{"href":"coll1_link2","name":"Coll1 Title2"}],"coll2":[{"href":"coll2_link2","name":"Coll2 Title2"},{"href":"coll2_link2","name":"Coll2 Title2"}]};</script></body>
+<script>var my_data = {"top_link":{"url":"https://top.link","name":"New Top Link"},"formdata":{"text_key":"text_val","radio_key":"radio_val_checked","checkbox_key":["1","3"],"select_key":"select_val2"},"to_delete":[{"contents":"Third item to be deleted"},{"contents":"Third item to be deleted"},{"contents":"Third item to be deleted"}],"coll1":[{"href":"coll1_link2","name":"Coll1 Title2"},{"href":"coll1_link2","name":"Coll1 Title2"}],"coll2":[{"href":"coll2_link2","name":"Coll2 Title2"},{"href":"coll2_link2","name":"Coll2 Title2"}]};</script></body>
 </html>"##;
 
     assert_eq!(processed_html,expected_html_output);
-    assert_eq!(Rc::clone(&errors).borrow().len(), 0);
 }

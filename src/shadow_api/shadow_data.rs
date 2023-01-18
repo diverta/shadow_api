@@ -214,12 +214,30 @@ impl ShadowData {
                 panic!("ShadowData::get_map_mut.force_object is neither object nor array. Program bug");
             },
             ShadowData::Array(ref mut data) => {
-                println!("FORCE OBJECT");
                 let new_data = ShadowData::wrap(ShadowData::new_object());
                 data.push(Rc::clone(&new_data));
                 Some(new_data)
             },
             ShadowData::Object(_) => None, // Perfect as-is
+        }
+    }
+    pub fn transform_strings(&mut self, f: fn(&mut String)) {
+        match self {
+            ShadowData::String(s) => {
+                f(&mut s.borrow_mut());
+            },
+            ShadowData::Array(arr) => {
+                arr.iter().for_each(|a| {
+                    // Cannot change keys (would require removing and reinserting new). Don't do for now
+                    a.borrow_mut().transform_strings(f);
+                });
+            },
+            ShadowData::Object(obj) => {
+                obj.iter().for_each(|a| {
+                    // Cannot change keys (would require removing and reinserting new). Don't do for now
+                    a.1.borrow_mut().transform_strings(f);
+                });
+            },
         }
     }
 }
