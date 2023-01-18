@@ -83,7 +83,7 @@ impl ShadowJson {
     }
 
     // Useful for replacing values in parsed ShadowJson
-    pub fn transform_strings(&mut self, f: fn(&mut String)) {
+    pub fn transform_strings(&mut self, f: &dyn Fn(&mut String)) {
         f(&mut self.s);
 
         if let Some(edit) = &mut self.edit {
