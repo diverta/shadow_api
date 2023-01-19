@@ -203,7 +203,6 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([Rc::new(RefC
     let bytes = output.into_inner().unwrap_or_default();
 
     let processed_html = String::from_utf8(bytes).unwrap_or("<UTF8 ERROR>".to_string());
-    println!("PROCESSED: {}", processed_html);
     let expected_html_output = r##"<html>
 <head>
 </head>
