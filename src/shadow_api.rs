@@ -197,22 +197,17 @@ impl ShadowApi<'_> {
         // Element handler function: it processes the node as an element
         let mut use_element_handler = false;
         let mut use_text_handler = false;
-        if json_def_b.delete.unwrap_or(false) {
-            use_element_handler = true;
-        }
         let empty_vec = Vec::new();
-        if json_def_b.hide.unwrap_or(false)
+
+        if // Listing all cases where we will need to generate an ECH for the element. Minimizing the cases will improve runtime performance
+            json_def_b.hide.unwrap_or(false)
             || json_def_b.insert_after.as_ref().unwrap_or(&empty_vec).len() > 0
             || json_def_b.insert_before.as_ref().unwrap_or(&empty_vec).len() > 0
             || json_def_b.append.as_ref().unwrap_or(&empty_vec).len() > 0
             || json_def_b.prepend.as_ref().unwrap_or(&empty_vec).len() > 0
-            {
-            use_element_handler = true;
-        }
-        if let Some(_html_tags) = &json_def_b.insert_after {
-            use_element_handler = true;
-        }
-        if let Some(_html_tags) = &json_def_b.insert_before {
+            || json_def_b.edit.is_some()
+            || json_def_b.delete.unwrap_or(false)
+        {
             use_element_handler = true;
         }
         if let Some(data_def) = &json_def_b.data {
