@@ -234,6 +234,11 @@ impl ShadowApi<'_> {
                 }
             }
         }
+        if let Some(edit) = &json_def_b.edit {
+            if edit.content.is_some() {
+                use_text_handler = true;
+            }
+        }
 
         if use_element_handler {
             let eh_errors = Rc::clone(&errors_rc);
@@ -485,33 +490,33 @@ impl ShadowApi<'_> {
         if el.last_in_text_node() {
             // Last text chunk reached : process the buffer, send it back and reset it
             // PROCESSING BEGINS
+            if let Some(edit) = &json_def_b.edit {
+                if let Some(content) = &edit.content {
+                    match content.op.as_str() {
+                        "delete" => {
+                            *content_buffer_b = String::new();
+                        }
+                        "upsert" => {
+                            if let Some(value) = &content.val {
+                                *content_buffer_b = value.clone();
+                            } else {
+                                let mut errors_m = errors.borrow_mut();
+                                errors_m.push(format!("Upsert requires an existing val content string"));
+                            }
+                        }
+                        other => {
+                            let mut errors_m = errors.borrow_mut();
+                            errors_m.push(format!("Invalid operation (edit.content): {}. Allowed values : delete/upsert", other));
+                        }
+                    }
+                }
+            }
             if let Some(data_def) = &json_def_b.data {
                 if let Some(values) = &data_def.values {
                     if !values.is_empty() {
                         for (key, value) in values.iter() {
                             match value {
                                 ShadowJsonValueSource::Contents => {
-                                        if let Some(edit) = &json_def_b.edit {
-                                            if let Some(content) = &edit.content {
-                                                match content.op.as_str() {
-                                                    "delete" => {
-                                                        *content_buffer_b = String::new();
-                                                    }
-                                                    "upsert" => {
-                                                        if let Some(value) = &content.val {
-                                                            *content_buffer_b = value.clone();
-                                                        } else {
-                                                            let mut errors_m = errors.borrow_mut();
-                                                            errors_m.push(format!("Upsert requires val attribute (edit.attrs.{})", key));
-                                                        }
-                                                    }
-                                                    other => {
-                                                        let mut errors_m = errors.borrow_mut();
-                                                        errors_m.push(format!("Invalid operation (edit.attrs.{}): {}. Allowed values : delete/upsert",key, other));
-                                                    }
-                                                }
-                                            }
-                                        }
                                         Self::prepare_array_element(Rc::clone(&new_data_init), Weak::clone(&parent_array), key);
                                         let mut new_data_m = new_data_init.borrow_mut();
                                         new_data_m.set(key, ShadowData::wrap(ShadowData::new_string(content_buffer_b.clone())));

@@ -7,6 +7,7 @@ use shadow_api::ShadowApi;
 fn test() {
     let html_source = r##"<html>
 <head>
+  <title>Old Title</title>
 </head>
 <body>
   <a class="top_link" href="https://top.link" style="display:none">TopLink</a>
@@ -52,7 +53,21 @@ fn test() {
 </html>"##;
 
 let errors: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
-let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([Rc::new(RefCell::new(ShadowJson::parse_str(r##"
+let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
+    // First ShadowJson
+    Rc::new(RefCell::new(ShadowJson::parse_str(r##"
+{
+    "s": "head > title",
+    "edit": {
+        "content": {
+            "op": "upsert",
+            "val": "New Title"
+        }
+    }
+}
+    "##, Rc::clone(&errors)))),
+    // Second ShadowJson
+    Rc::new(RefCell::new(ShadowJson::parse_str(r##"
 {
     "s": "body",
     "sub": [
@@ -173,7 +188,7 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([Rc::new(RefC
         }
     ]
 }
-"##, Rc::clone(&errors))))]));
+"##, Rc::clone(&errors))))],));
 
     let mut shadow_api_o = ShadowApi::new();
     shadow_api_o.set_data_formatter(Rc::new(Box::new(move |data: String| {
@@ -184,9 +199,9 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([Rc::new(RefC
 
     {
         // Testing ShadowJson string transform
-        let first_shadowjson = Rc::clone(Rc::clone(&json_def).get(0).unwrap());
-        let mut first_shadowjson = first_shadowjson.borrow_mut();
-        first_shadowjson.transform_strings(&mut |s: &mut String| {
+        let second_shadowjson = Rc::clone(Rc::clone(&json_def).get(1).unwrap());
+        let mut second_shadowjson = second_shadowjson.borrow_mut();
+        second_shadowjson.transform_strings(&mut |s: &mut String| {
             *s = s.replace("Append", "AppendModified");
         });
     }
@@ -205,6 +220,7 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([Rc::new(RefC
     let processed_html = String::from_utf8(bytes).unwrap_or("<UTF8 ERROR>".to_string());
     let expected_html_output = r##"<html>
 <head>
+  <title>New Title</title>
 </head>
 <body>
   <a class="top_link" href="https://top.link" id="123">New Top Link</a>
