@@ -1,0 +1,132 @@
+{
+    "type": "object",
+    "properties": {
+      "s": {
+        "type": "string"
+      },
+      "hide": {
+        "type": "boolean"
+      },
+      "delete": {
+        "type": "boolean"
+      },
+      "edit": {
+        "$ref": "#/$defs/ShadowJsonEdit"
+      },
+      "data": {
+        "$ref": "#/$defs/ShadowJsonData"
+      },
+      "append": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "prepend": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "insert_before": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "insert_after": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "sub": {
+        "type": "array",
+        "items": {
+          "$ref": "#"
+        }
+      }
+    },
+    "$defs": {
+      "ShadowJsonEditOne": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "upsert",
+              "delete",
+              "match_replace"
+            ]
+          },
+          "val": {
+            "type": "string"
+          },
+          "match": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "additionalProperties": false
+      },
+      "ShadowJsonEdit": {
+        "type": "object",
+        "properties": {
+          "attrs": {
+            "type": "object",
+            "properties": {
+              "itemType": {
+                "$ref": "#/$defs/ShadowJsonEditOne"
+              }
+            }
+          },
+          "content": {
+            "$ref": "#/$defs/ShadowJsonEditOne"
+          }
+        }
+      },
+      "ShadowJsonData": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "values": {
+            "type": "object",
+            "properties": {
+              "itemType": {
+                "$ref": "#/$defs/ShadowJsonValueSource"
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ShadowJsonValueSource": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "Attribute",
+              "Contents",
+              "Value"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "required": [
+      "s"
+    ],
+    "additionalProperties": false
+  }
