@@ -392,7 +392,7 @@ impl ShadowApi<'_> {
                                 }
                             }
                             other => {
-                                errors.borrow_mut().push(format!("Invalid operation (edit.attrs.{}): {}. Allowed values : delete/upsert", key, other));
+                                errors.borrow_mut().push(format!("Invalid operation (edit.attrs.{}): {}. Allowed values : delete/upsert/match_replace", key, other));
                             }
                         }
                     }
@@ -509,11 +509,11 @@ impl ShadowApi<'_> {
             regex_not_computed = match Regex::new(r#match) {
                 Ok(r_computed) => {
                     regex_map.insert(r#match.to_string(), r_computed);
-                    true
+                    false
                 },
                 Err(e) => {
                     errors.borrow_mut().push(format!("Invalid regex: {} | Error: {}", r#match, e));
-                    false
+                    true
                 },
             }
         }
@@ -605,7 +605,7 @@ impl ShadowApi<'_> {
                         }
                         other => {
                             let mut errors_m = errors.borrow_mut();
-                            errors_m.push(format!("Invalid operation (edit.content): {}. Allowed values : delete/upsert", other));
+                            errors_m.push(format!("Invalid operation (edit.content): {}. Allowed values : delete/upsert/match_replace", other));
                         }
                     }
                 }

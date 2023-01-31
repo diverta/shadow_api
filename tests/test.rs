@@ -8,8 +8,11 @@ fn test() {
     let html_source = r##"<html>
 <head>
   <title>Old Title</title>
+  <meta name="meta1" content="meta1 content">
+  <meta name="meta2" content="meta2 content">
 </head>
 <body>
+  <div name="match_test">Apple Banana</div>
   <a class="top_link" href="https://top.link" style="display:none">TopLink</a>
   <div class="to_delete">First item to be deleted</div>
   <div id="first">
@@ -57,13 +60,30 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
     // First ShadowJson
     Rc::new(RefCell::new(ShadowJson::parse_str(r##"
 {
-    "s": "head > title",
-    "edit": {
-        "content": {
-            "op": "upsert",
-            "val": "New Title"
+    "s": "head",
+    "sub": [
+        {
+            "s": "title",
+            "edit": {
+                "content": {
+                    "op": "upsert",
+                    "val": "New Title"
+                }
+            }
+        },
+        {
+            "s": "meta",
+            "edit": {
+                "attrs": {
+                    "content": {
+                        "op": "match_replace",
+                        "match": "^(.*) content$",
+                        "val": "just $1"
+                    }
+                }
+            }
         }
-    }
+    ]
 }
     "##, Rc::clone(&errors)))),
     // Second ShadowJson
@@ -71,6 +91,16 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
 {
     "s": "body",
     "sub": [
+        {
+            "s": "div[name=\"match_test\"]",
+            "edit": {
+                "content": {
+                    "op": "match_replace",
+                    "match": "(\\S+) (\\S+)",
+                    "val": "$2 $1"
+                }
+            }
+        },
         {
             "s": "a.top_link",
             "edit": {
@@ -221,8 +251,11 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
     let expected_html_output = r##"<html>
 <head>
   <title>New Title</title>
+  <meta name="meta1" content="just meta1">
+  <meta name="meta2" content="just meta2">
 </head>
 <body>
+  <div name="match_test">Banana Apple</div>
   <a class="top_link" href="https://top.link" id="123">New Top Link</a>
   
   <div id="first">
