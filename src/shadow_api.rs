@@ -10,7 +10,9 @@
 //! 
 //! It is recommended that the steps 1,2 and 3 are done while waiting for the backend response (using `Fastly::Request::send_async` for example) - especially if ShadowJson is fetched through another API.
 
+use std::any::Any;
 use std::cell::{RefCell};
+use std::collections::HashMap;
 use std::io::{Write};
 use std::rc::{Rc, Weak};
 use std::borrow::{Cow};
@@ -21,6 +23,7 @@ use lol_html::{ElementContentHandlers, Selector, HtmlRewriter, Settings};
 mod shadow_data;
 mod shadow_json;
 
+use regex::Regex;
 pub use shadow_data::ShadowData;
 pub use shadow_json::ShadowJson;
 use shadow_json::ShadowJsonValueSource;
@@ -63,6 +66,14 @@ impl ShadowApi<'_> {
         let mut selector_stack: Vec<String> = Vec::with_capacity(10);
         let mut ech_borrowed = self.ech.borrow_mut();
         let ech = ech_borrowed.as_mut();
+        let cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>> = Rc::new(RefCell::new(HashMap::new()));
+        {
+            let mut cache_borrowed = cache.borrow_mut();
+
+            // Cache for computed regex executed while stream processing the HTML
+            let regex_map: HashMap<String, Regex> = HashMap::new();
+            cache_borrowed.insert(String::from("regex_map"), Box::new(regex_map));
+        }
         Self::parse_rec(
             json_def,
             errors,
@@ -70,7 +81,8 @@ impl ShadowApi<'_> {
             Weak::new(),
             ech,
             &mut selector_stack,
-            Rc::clone(&self.content_buffer)
+            Rc::clone(&self.content_buffer),
+            cache
         );
         Self::data_content_handler(Rc::clone(&self.data), Rc::clone(&self.data_formatter), ech); // This will create a special handler to inject data at the end
     }
@@ -82,7 +94,8 @@ impl ShadowApi<'_> {
         parent_array: Weak<RefCell<ShadowData>>,
         ech: &mut Vec<(Cow<Selector>, ElementContentHandlers)>,
         selector_stack: &mut Vec<String>, // To build full selector
-        content_buffer: Rc<RefCell<String>>
+        content_buffer: Rc<RefCell<String>>,
+        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>
     ) {
         for el in json_def.as_ref() {
             Self::parse_one(
@@ -92,7 +105,8 @@ impl ShadowApi<'_> {
                 Weak::clone(&parent_array),
                 ech,
                 selector_stack,
-                Rc::clone(&content_buffer)
+                Rc::clone(&content_buffer),
+                Rc::clone(&cache)
             );
         }
     }
@@ -104,7 +118,8 @@ impl ShadowApi<'_> {
         mut parent_array: Weak<RefCell<ShadowData>>,
         ech: &mut Vec<(Cow<Selector>, ElementContentHandlers)>,
         selector_stack: &mut Vec<String>, // To build full selector
-        content_buffer: Rc<RefCell<String>>
+        content_buffer: Rc<RefCell<String>>,
+        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>
     ) {
         let json_def_b = json_def.borrow();
         if json_def_b.s.as_str().len() == 0 {
@@ -241,9 +256,12 @@ impl ShadowApi<'_> {
         }
 
         if use_element_handler {
+            // Getting an extra RC before moving these into closure
             let eh_errors = Rc::clone(&errors_rc);
             let eh_json_def = Rc::clone(&json_def);
             let eh_data = Rc::clone(&next_data);
+            let eh_cache = Rc::clone(&cache);
+
             let parent_array_cloned = Weak::clone(&parent_array);
             ech.push((
                 Cow::Owned(current_selector.parse().unwrap()),
@@ -253,17 +271,21 @@ impl ShadowApi<'_> {
                         Rc::clone(&eh_json_def),
                         Rc::clone(&eh_data),
                         Weak::clone(&parent_array_cloned),
-                        Rc::clone(&eh_errors)
+                        Rc::clone(&eh_errors),
+                        Rc::clone(&eh_cache)
                     )
                 })
             ));
         }
         if use_text_handler {
+            // Getting an extra RC before moving these into closure
             let th_errors = Rc::clone(&errors_rc);
             let th_json_def = Rc::clone(&json_def);
             let th_data = Rc::clone(&next_data);
-            let parent_array_cloned = Weak::clone(&parent_array);
+            let th_cache = Rc::clone(&cache);
             let th_content_buffer = Rc::clone(&content_buffer);
+
+            let parent_array_cloned = Weak::clone(&parent_array);
             ech.push((
                 Cow::Owned(current_selector.parse().unwrap()),
                 ElementContentHandlers::default().text(move |el| {
@@ -273,7 +295,8 @@ impl ShadowApi<'_> {
                         Rc::clone(&th_data),
                         Weak::clone(&parent_array_cloned),
                         Rc::clone(&th_errors),
-                        Rc::clone(&th_content_buffer)
+                        Rc::clone(&th_content_buffer),
+                        Rc::clone(&th_cache)
                     )
                 })
             ));
@@ -287,7 +310,8 @@ impl ShadowApi<'_> {
                 parent_array,
                 ech,
                 selector_stack,
-                Rc::clone(&content_buffer)
+                Rc::clone(&content_buffer),
+                Rc::clone(&cache)
             );
         }
 
@@ -299,7 +323,8 @@ impl ShadowApi<'_> {
         json_def: Rc<RefCell<ShadowJson>>,
         new_data_init: Rc<RefCell<ShadowData>>,
         parent_array: Weak<RefCell<ShadowData>>,
-        errors: Rc<RefCell<Vec<String>>>
+        errors: Rc<RefCell<Vec<String>>>,
+        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let json_def_b = json_def.borrow();
         let delete = json_def_b.delete.unwrap_or(false);
@@ -342,17 +367,32 @@ impl ShadowApi<'_> {
                             "upsert" => {
                                 if let Some(value) = &val.val {
                                     if let Err(e) = el.set_attribute(key, value.as_str()) {
-                                        let mut errors_m = errors.borrow_mut();
-                                        errors_m.push(format!("Unable to set attribute (edit.attrs.{}): {}", key, e));
+                                        errors.borrow_mut().push(format!("Unable to set attribute (edit.attrs.{}): {}", key, e));
                                     }
                                 } else {
-                                    let mut errors_m = errors.borrow_mut();
-                                    errors_m.push(format!("Upsert requires val attribute (edit.attrs.{})", key));
+                                    errors.borrow_mut().push(format!("Upsert requires val attribute (edit.attrs.{})", key));
+                                }
+                            }
+                            "match_replace" => {
+                                if let Some(r#match) = &val.r#match {
+                                    if let Some(new_value) = &val.val {
+                                        let old_value = &el.get_attribute(key).unwrap_or("".to_owned());
+                                        if let Some(replacement) = Self::match_replace(
+                                            r#match,
+                                            old_value,
+                                            new_value,
+                                            Rc::clone(&errors),
+                                            Rc::clone(&cache)
+                                        ) {
+                                            if let Err(e) = el.set_attribute(key, &replacement) {
+                                                errors.borrow_mut().push(format!("Unable to set attribute via match_replace (edit.attrs.{}): {}", key, e));
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             other => {
-                                let mut errors_m = errors.borrow_mut();
-                                errors_m.push(format!("Invalid operation (edit.attrs.{}): {}. Allowed values : delete/upsert",key, other));
+                                errors.borrow_mut().push(format!("Invalid operation (edit.attrs.{}): {}. Allowed values : delete/upsert", key, other));
                             }
                         }
                     }
@@ -447,6 +487,49 @@ impl ShadowApi<'_> {
         Ok(())
     }
 
+    // Applies a regex to old_value and replaces with new_value
+    // First access regex will be cached
+    // Return None if no matches or error computing the regex
+    fn match_replace<'a>(
+        r#match: &'a String,
+        old_value: &'a String,
+        new_value: &'a String,
+        errors: Rc<RefCell<Vec<String>>>,
+        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>
+    ) -> Option<Cow<'a, str>> {
+        let mut cache_borrowed = cache.borrow_mut();
+        let regex_map: &mut HashMap<String, Regex> = cache_borrowed
+            .get_mut("regex_map")
+            .unwrap() // Instantiated during cache creation
+            .downcast_mut::<HashMap<String, Regex>>()
+            .unwrap(); // The type is known and fixed
+        let mut regex_not_computed = regex_map.get(r#match).is_none();
+        if regex_not_computed {
+            // Not cached. Attempt to compute regex and cache it
+            regex_not_computed = match Regex::new(r#match) {
+                Ok(r_computed) => {
+                    regex_map.insert(r#match.to_string(), r_computed);
+                    true
+                },
+                Err(e) => {
+                    errors.borrow_mut().push(format!("Invalid regex: {} | Error: {}", r#match, e));
+                    false
+                },
+            }
+        }
+        if !regex_not_computed { // If still not computed => There was an error during computation. In that case do nothing
+            let regex = regex_map.get(r#match).unwrap(); // We are certain it must exist now
+            let new_val = regex.replace_all(
+                old_value,
+                new_value
+            ); // If no match, replace returns the original old_value
+            if &new_val != old_value {
+                return Some(new_val)
+            }
+        }
+        None
+    }
+
     fn prepare_array_element(
         current_el: Rc<RefCell<ShadowData>>,
         parent_array: Weak<RefCell<ShadowData>>,
@@ -481,7 +564,8 @@ impl ShadowApi<'_> {
         new_data_init: Rc<RefCell<ShadowData>>,
         parent_array: Weak<RefCell<ShadowData>>,
         errors: Rc<RefCell<Vec<String>>>,
-        content_buffer: Rc<RefCell<String>>
+        content_buffer: Rc<RefCell<String>>,
+        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let json_def_b = json_def.borrow();
         let mut content_buffer_b = content_buffer.borrow_mut();
@@ -502,6 +586,21 @@ impl ShadowApi<'_> {
                             } else {
                                 let mut errors_m = errors.borrow_mut();
                                 errors_m.push(format!("Upsert requires an existing val content string"));
+                            }
+                        }
+                        "match_replace" => {
+                            if let Some(r#match) = &content.r#match {
+                                if let Some(new_value) = &content.val {
+                                    if let Some(replacement) = Self::match_replace(
+                                        r#match,
+                                        &content_buffer_b,
+                                        new_value,
+                                        Rc::clone(&errors),
+                                        Rc::clone(&cache)
+                                    ) {
+                                        *content_buffer_b = replacement.to_string();
+                                    }
+                                }
                             }
                         }
                         other => {

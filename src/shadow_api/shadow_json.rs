@@ -62,7 +62,8 @@ pub struct ShadowJsonEdit {
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct ShadowJsonEditOne {
     pub op: String,
-    pub val: Option<String>
+    pub val: Option<String>,
+    pub r#match: Option<String>
 }
 impl ShadowJson {
     // Wrapper function to unformize deserialization and add global error handling
