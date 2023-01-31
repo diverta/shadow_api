@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::io::{Write};
 use std::rc::{Rc, Weak};
 use std::borrow::{Cow};
+use std::str::FromStr;
 use indexmap::IndexMap;
 use lol_html::html_content::{ContentType, Element, TextChunk};
 use lol_html::{ElementContentHandlers, Selector, HtmlRewriter, Settings};
@@ -129,6 +130,15 @@ impl ShadowApi<'_> {
         }
         selector_stack.push(json_def_b.s.clone());
         let current_selector = selector_stack.join(" "); // Since LOLHTML is not building dom tree, we need to build the absolute selector
+
+        // Validating the selector
+        let current_selector_obj = match Selector::from_str(&current_selector) {
+            Ok(s) => s,
+            Err(e) => {
+                errors_rc.borrow_mut().push(format!("Selector {} is invalid : {}", &current_selector, e));
+                return;
+            },
+        };
 
         let mut next_data: Rc<RefCell<ShadowData>> = Rc::clone(&data); // Prepare a cell for next loop iteration. Path will nest it
         let path: Option<String>;
@@ -264,7 +274,7 @@ impl ShadowApi<'_> {
 
             let parent_array_cloned = Weak::clone(&parent_array);
             ech.push((
-                Cow::Owned(current_selector.parse().unwrap()),
+                Cow::Owned(current_selector_obj.clone()),
                 ElementContentHandlers::default().element(move |el| {
                     Self::element_content_handler(
                         el,
@@ -287,7 +297,7 @@ impl ShadowApi<'_> {
 
             let parent_array_cloned = Weak::clone(&parent_array);
             ech.push((
-                Cow::Owned(current_selector.parse().unwrap()),
+                Cow::Owned(current_selector_obj),
                 ElementContentHandlers::default().text(move |el| {
                     Self::text_content_handler(
                         el,
