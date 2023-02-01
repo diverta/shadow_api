@@ -32,8 +32,7 @@ use shadow_json::ShadowJsonValueSource;
 pub struct ShadowApi<'a> {
     pub data: Rc<RefCell<ShadowData>>,
     data_formatter: Rc<Box<dyn Fn(String) -> String>>,
-    ech: RefCell<Vec<(Cow<'a, Selector>, ElementContentHandlers<'a>)>>,
-    content_buffer: Rc<RefCell<String>>
+    ech: RefCell<Vec<(Cow<'a, Selector>, ElementContentHandlers<'a>)>>
 }
 
 impl ShadowApi<'_> {
@@ -41,8 +40,7 @@ impl ShadowApi<'_> {
         ShadowApi {
             data: ShadowData::wrap(ShadowData::new_object()),
             data_formatter: Rc::new(Box::new(Self::default_data_formatter)),
-            ech: RefCell::new(Vec::new()),
-            content_buffer: Rc::new(RefCell::new(String::new()))
+            ech: RefCell::new(Vec::new())
         }
     }
 
@@ -82,7 +80,6 @@ impl ShadowApi<'_> {
             Weak::new(),
             ech,
             &mut selector_stack,
-            Rc::clone(&self.content_buffer),
             cache
         );
         Self::data_content_handler(Rc::clone(&self.data), Rc::clone(&self.data_formatter), ech); // This will create a special handler to inject data at the end
@@ -95,7 +92,6 @@ impl ShadowApi<'_> {
         parent_array: Weak<RefCell<ShadowData>>,
         ech: &mut Vec<(Cow<Selector>, ElementContentHandlers)>,
         selector_stack: &mut Vec<String>, // To build full selector
-        content_buffer: Rc<RefCell<String>>,
         cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>
     ) {
         for el in json_def.as_ref() {
@@ -106,7 +102,6 @@ impl ShadowApi<'_> {
                 Weak::clone(&parent_array),
                 ech,
                 selector_stack,
-                Rc::clone(&content_buffer),
                 Rc::clone(&cache)
             );
         }
@@ -119,7 +114,6 @@ impl ShadowApi<'_> {
         mut parent_array: Weak<RefCell<ShadowData>>,
         ech: &mut Vec<(Cow<Selector>, ElementContentHandlers)>,
         selector_stack: &mut Vec<String>, // To build full selector
-        content_buffer: Rc<RefCell<String>>,
         cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>
     ) {
         let json_def_b = json_def.borrow();
@@ -293,7 +287,7 @@ impl ShadowApi<'_> {
             let th_json_def = Rc::clone(&json_def);
             let th_data = Rc::clone(&next_data);
             let th_cache = Rc::clone(&cache);
-            let th_content_buffer = Rc::clone(&content_buffer);
+            let th_content_buffer = Rc::new(RefCell::new(String::new())); // Text content buffer is local for each selector
 
             let parent_array_cloned = Weak::clone(&parent_array);
             ech.push((
@@ -320,7 +314,6 @@ impl ShadowApi<'_> {
                 parent_array,
                 ech,
                 selector_stack,
-                Rc::clone(&content_buffer),
                 Rc::clone(&cache)
             );
         }
