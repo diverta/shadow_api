@@ -29,10 +29,13 @@ pub use shadow_data::ShadowData;
 pub use shadow_json::ShadowJson;
 use shadow_json::ShadowJsonValueSource;
 
+const MAX_CHUNK_BYTESIZE: usize = 2048;
+
 pub struct ShadowApi<'a> {
     pub data: Rc<RefCell<ShadowData>>,
     data_formatter: Rc<Box<dyn Fn(String) -> String>>,
-    ech: RefCell<Vec<(Cow<'a, Selector>, ElementContentHandlers<'a>)>>
+    ech: RefCell<Vec<(Cow<'a, Selector>, ElementContentHandlers<'a>)>>,
+    max_chunk_bytesize: usize
 }
 
 impl ShadowApi<'_> {
@@ -40,8 +43,13 @@ impl ShadowApi<'_> {
         ShadowApi {
             data: ShadowData::wrap(ShadowData::new_object()),
             data_formatter: Rc::new(Box::new(Self::default_data_formatter)),
-            ech: RefCell::new(Vec::new())
+            ech: RefCell::new(Vec::new()),
+            max_chunk_bytesize: MAX_CHUNK_BYTESIZE
         }
+    }
+
+    pub fn set_max_chunk_bytesize(&mut self, bytesize: usize) {
+        self.max_chunk_bytesize = bytesize;
     }
 
     pub fn set_data_formatter(&mut self, formatter: Rc<Box<dyn Fn(String) -> String>>) {
@@ -672,8 +680,10 @@ impl ShadowApi<'_> {
                 ..Settings::default()
             },
             |c: &[u8]| {
-                if let Err(e) = writer.write(c) {
-                    errors_rewrite_client.push(format!("Error writing to client body : {}",e));
+                for chunk in c.chunks(self.max_chunk_bytesize) { // Setting upper limit to writable chunk size
+                    if let Err(e) = writer.write(chunk) {
+                        errors_rewrite_client.push(format!("Error writing to client body : {}",e));
+                    }
                 }
             }
         );
