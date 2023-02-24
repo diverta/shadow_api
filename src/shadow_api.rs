@@ -34,7 +34,7 @@ const MAX_CHUNK_BYTESIZE: usize = 2048;
 pub struct ShadowApi<'a> {
     pub data: Rc<RefCell<ShadowData>>,
     data_formatter: Rc<Box<dyn Fn(String) -> String>>,
-    ech: RefCell<Vec<(Cow<'a, Selector>, ElementContentHandlers<'a>)>>,
+    pub ech: RefCell<Vec<(Cow<'a, Selector>, ElementContentHandlers<'a>)>>,
     max_chunk_bytesize: usize
 }
 
@@ -44,7 +44,7 @@ impl ShadowApi<'_> {
             data: ShadowData::wrap(ShadowData::new_object()),
             data_formatter: Rc::new(Box::new(Self::default_data_formatter)),
             ech: RefCell::new(Vec::new()),
-            max_chunk_bytesize: MAX_CHUNK_BYTESIZE
+            max_chunk_bytesize: MAX_CHUNK_BYTESIZE,
         }
     }
 
