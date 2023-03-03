@@ -25,6 +25,7 @@ mod shadow_data;
 mod shadow_json;
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 pub use shadow_data::ShadowData;
 pub use shadow_json::ShadowJson;
 use shadow_json::ShadowJsonValueSource;
@@ -35,16 +36,24 @@ pub struct ShadowApi<'a> {
     pub data: Rc<RefCell<ShadowData>>,
     data_formatter: Rc<Box<dyn Fn(String) -> String>>,
     pub ech: RefCell<Vec<(Cow<'a, Selector>, ElementContentHandlers<'a>)>>,
-    max_chunk_bytesize: usize
+    max_chunk_bytesize: usize,
+    options: Option<ShadowApiOptions>
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Copy, Clone)]
+pub struct ShadowApiOptions {
+    #[serde(default)]
+    pub as_json: bool,
 }
 
 impl ShadowApi<'_> {
-    pub fn new() -> Self {
+    pub fn new(options: Option<ShadowApiOptions>) -> Self {
         ShadowApi {
             data: ShadowData::wrap(ShadowData::new_object()),
             data_formatter: Rc::new(Box::new(Self::default_data_formatter)),
             ech: RefCell::new(Vec::new()),
             max_chunk_bytesize: MAX_CHUNK_BYTESIZE,
+            options,
         }
     }
 
@@ -90,7 +99,11 @@ impl ShadowApi<'_> {
             &mut selector_stack,
             cache
         );
-        Self::data_content_handler(Rc::clone(&self.data), Rc::clone(&self.data_formatter), ech); // This will create a special handler to inject data at the end
+        let dom_written = self.options.as_ref().and_then(|opt| Some(!opt.as_json)).unwrap_or(true);
+        if dom_written {
+            // No need for data content DOM injection if "as_json" option is set
+            Self::data_content_handler(Rc::clone(&self.data), Rc::clone(&self.data_formatter), ech); // This will create a special handler to inject data at the end
+        }
     }
 
     fn parse_rec(
@@ -667,6 +680,21 @@ impl ShadowApi<'_> {
         ));
     }
 
+    pub fn process_json<W>(&self, writer : &mut W, errors: Rc<RefCell<Vec<String>>>)
+    where
+        W: Write
+    {
+        let data_str = self.data.borrow().to_string();
+        // Write string chunk by chunk
+        for chunk in data_str
+            .bytes().collect::<Vec<u8>>()
+            .chunks(self.max_chunk_bytesize) {
+                if let Err(e) = writer.write(chunk) {
+                    errors.borrow_mut().push(format!("Error writing to client body : {}",e));
+                }
+            }
+    }
+
     pub fn process_html<W, R>(&self, writer: &mut W, chunk_iter: &mut R, errors: Rc<RefCell<Vec<String>>>)
     where
         W: Write,
@@ -674,16 +702,23 @@ impl ShadowApi<'_> {
     {
         let mut errors_rewrite_client: Vec<String> = Vec::new();
         let ech = self.ech.take(); // This is the last time we use ech, so we can remove it
+
+        let as_json = self.options.and_then(|opts| Some(opts.as_json)).unwrap_or(false);
+
         let mut rewriter = HtmlRewriter::new(
             Settings {
                 element_content_handlers: ech,
                 ..Settings::default()
             },
             |c: &[u8]| {
-                for chunk in c.chunks(self.max_chunk_bytesize) { // Setting upper limit to writable chunk size
-                    if let Err(e) = writer.write(chunk) {
-                        errors_rewrite_client.push(format!("Error writing to client body : {}",e));
+                if !as_json {
+                    for chunk in c.chunks(self.max_chunk_bytesize) { // Setting upper limit to writable chunk size
+                        if let Err(e) = writer.write(chunk) {
+                            errors_rewrite_client.push(format!("Error writing to client body : {}",e));
+                        }
                     }
+                } else {
+                    // Discard HTML data, no write
                 }
             }
         );
@@ -695,6 +730,12 @@ impl ShadowApi<'_> {
                     errors_m.push(format!("Error writing to rewriter : {}", e));
                 }
             }
+        }
+        if let Err(err) = rewriter.end() {
+            errors_rewrite_client.push(format!("Error ending the rewriter : {}", err.to_string()));
+        }
+        if as_json {
+            self.process_json(writer, Rc::clone(&errors));
         }
         {
             let mut errors_m = errors.borrow_mut();
