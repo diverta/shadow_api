@@ -243,7 +243,6 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
     shadow_api_o.process_html(
         &mut output,
         &mut bytes,
-        cache,
         Rc::clone(&errors)
     );
 

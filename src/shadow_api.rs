@@ -24,6 +24,7 @@ use lol_html::{ElementContentHandlers, Selector, HtmlRewriter, Settings};
 
 mod shadow_error;
 mod shadow_data;
+mod shadow_data_cursor;
 mod shadow_json;
 
 use regex::Regex;
@@ -31,6 +32,7 @@ use serde::{Deserialize, Serialize};
 pub use shadow_error::ShadowError;
 pub use shadow_data::ShadowData;
 pub use shadow_json::ShadowJson;
+pub use shadow_data_cursor::ShadowDataCursor;
 use shadow_json::ShadowJsonValueSource;
 
 const MAX_CHUNK_BYTESIZE: usize = 2048;
@@ -39,7 +41,8 @@ pub struct ShadowApi<'a> {
     data_formatter: Rc<Box<dyn Fn(String) -> String>>,
     pub ech: RefCell<Vec<(Cow<'a, Selector>, ElementContentHandlers<'a>)>>,
     max_chunk_bytesize: usize,
-    options: Option<ShadowApiOptions>
+    options: Option<ShadowApiOptions>,
+    pub shadow_data_cursor: Rc<RefCell<ShadowDataCursor>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Copy, Clone)]
@@ -55,6 +58,7 @@ impl ShadowApi<'_> {
             ech: RefCell::new(Vec::new()),
             max_chunk_bytesize: MAX_CHUNK_BYTESIZE,
             options,
+            shadow_data_cursor: Rc::new(RefCell::new(ShadowDataCursor::init()))
         }
     }
 
@@ -92,18 +96,22 @@ impl ShadowApi<'_> {
             let regex_map: HashMap<String, Regex> = HashMap::new();
             cache_borrowed.insert(String::from("regex_map"), Box::new(regex_map));
         }
-        ShadowData::init_crawl_data(Rc::clone(&cache));
         Self::parse_rec(
             json_def,
             errors,
             ech,
             &mut selector_stack,
-            Rc::clone(&cache)
+            Rc::clone(&cache),
+            Rc::clone(&self.shadow_data_cursor),
         );
         let dom_written = self.options.as_ref().and_then(|opt| Some(!opt.as_json)).unwrap_or(true);
         if dom_written {
             // No need for data content DOM injection if "as_json" option is set
-            Self::data_content_handler(Rc::clone(&cache), Rc::clone(&self.data_formatter), ech); // This will create a special handler to inject data at the end
+            Self::data_content_handler(
+                Rc::clone(&self.data_formatter),
+                ech,
+                Rc::clone(&self.shadow_data_cursor)
+            ); // This will create a special handler to inject data at the end
         }
         cache
     }
@@ -113,7 +121,8 @@ impl ShadowApi<'_> {
         errors: Rc<RefCell<Vec<String>>>,
         ech: &mut Vec<(Cow<Selector>, ElementContentHandlers)>,
         selector_stack: &mut Vec<String>, // To build full selector
-        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>
+        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>,
+        shadow_data_cursor: Rc<RefCell<ShadowDataCursor>>
     ) {
         for el in json_def.as_ref() {
             Self::parse_one(
@@ -121,7 +130,8 @@ impl ShadowApi<'_> {
                 Rc::clone(&errors),
                 ech,
                 selector_stack,
-                Rc::clone(&cache)
+                Rc::clone(&cache),
+                Rc::clone(&shadow_data_cursor)
             );
         }
     }
@@ -131,7 +141,8 @@ impl ShadowApi<'_> {
         errors_rc: Rc<RefCell<Vec<String>>>,
         ech: &mut Vec<(Cow<Selector>, ElementContentHandlers)>,
         selector_stack: &mut Vec<String>, // To build full selector
-        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>
+        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>,
+        shadow_data_cursor: Rc<RefCell<ShadowDataCursor>>
     ) {
         static COUNTER: AtomicUsize = AtomicUsize::new(1);
         let selector_id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -225,6 +236,7 @@ impl ShadowApi<'_> {
             let eh_errors = Rc::clone(&errors_rc);
             let eh_json_def = Rc::clone(&json_def);
             let eh_cache = Rc::clone(&cache);
+            let eh_shadow_data_cursor = Rc::clone(&shadow_data_cursor);
 
             ech.push((
                 Cow::Owned(current_selector_obj.clone()),
@@ -234,7 +246,8 @@ impl ShadowApi<'_> {
                         selector_id,
                         Rc::clone(&eh_json_def),
                         Rc::clone(&eh_errors),
-                        Rc::clone(&eh_cache)
+                        Rc::clone(&eh_cache),
+                        Rc::clone(&eh_shadow_data_cursor)
                     )
                 })
             ));
@@ -245,6 +258,7 @@ impl ShadowApi<'_> {
             let th_json_def = Rc::clone(&json_def);
             let th_cache = Rc::clone(&cache);
             let th_content_buffer = Rc::new(RefCell::new(String::new())); // Text content buffer is local for each selector
+            let th_shadow_data_cursor = Rc::clone(&shadow_data_cursor);
 
             ech.push((
                 Cow::Owned(current_selector_obj),
@@ -255,7 +269,8 @@ impl ShadowApi<'_> {
                         Rc::clone(&th_json_def),
                         Rc::clone(&th_errors),
                         Rc::clone(&th_content_buffer),
-                        Rc::clone(&th_cache)
+                        Rc::clone(&th_cache),
+                        Rc::clone(&th_shadow_data_cursor)
                     )
                 })
             ));
@@ -267,7 +282,8 @@ impl ShadowApi<'_> {
                 Rc::clone(&errors_rc),
                 ech,
                 selector_stack,
-                Rc::clone(&cache)
+                Rc::clone(&cache),
+                Rc::clone(&shadow_data_cursor)
             );
         }
 
@@ -279,7 +295,8 @@ impl ShadowApi<'_> {
         selector_id: usize,
         json_def: Rc<RefCell<ShadowJson>>,
         errors: Rc<RefCell<Vec<String>>>,
-        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>
+        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>,
+        shadow_data_cursor: Rc<RefCell<ShadowDataCursor>>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let json_def_c = Rc::clone(&json_def);
         let json_def_b = json_def.borrow();
@@ -360,7 +377,7 @@ impl ShadowApi<'_> {
             el,
             selector_id,
             Rc::clone(&json_def_c),
-            Rc::clone(&cache)
+            Rc::clone(&shadow_data_cursor)
         ) {
             Ok(maybe_data) => {
                 if let Some(data_item) = maybe_data {
@@ -370,7 +387,7 @@ impl ShadowApi<'_> {
                             end,
                             selector_id,
                             Rc::clone(&json_def_c),
-                            Rc::clone(&cache)
+                            Rc::clone(&shadow_data_cursor)
                         );
                         Ok(())
                     });
@@ -574,7 +591,8 @@ impl ShadowApi<'_> {
         json_def: Rc<RefCell<ShadowJson>>,
         errors: Rc<RefCell<Vec<String>>>,
         content_buffer: Rc<RefCell<String>>,
-        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>
+        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>,
+        shadow_data_cursor: Rc<RefCell<ShadowDataCursor>>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let json_def_b = json_def.borrow();
         let mut content_buffer_b = content_buffer.borrow_mut();
@@ -620,19 +638,14 @@ impl ShadowApi<'_> {
                 }
             }
             if let Some(data_def) = &json_def_b.data {
-                let new_data_init = Rc::new(RefCell::new(ShadowData::default())); // TODO
-                let parent = Rc::downgrade(&new_data_init);
+                let data = &shadow_data_cursor.borrow().shadow_data;
+                let parent = Rc::downgrade(&data);
                 if let Some(values) = &data_def.values {
                     if !values.is_empty() {
                         for (key, value) in values.iter() {
                             match value {
                                 ShadowJsonValueSource::Contents => {
-                                        Self::prepare_array_element(
-                                            selector_id,
-                                            Rc::clone(&new_data_init),
-                                            key
-                                        );
-                                        let mut new_data_m = new_data_init.borrow_mut();
+                                        let mut new_data_m = data.borrow_mut();
                                         new_data_m.set(key, ShadowData::wrap(
                                             ShadowData::new_string(Some(selector_id), Weak::clone(&parent), content_buffer_b.clone())
                                         ));
@@ -653,25 +666,22 @@ impl ShadowApi<'_> {
     }
 
     fn data_content_handler(
-        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>,
         data_formatter: Rc<Box<dyn Fn(String) -> String>>,
-        ech: &mut Vec<(Cow<Selector>, ElementContentHandlers)>
+        ech: &mut Vec<(Cow<Selector>, ElementContentHandlers)>,
+        shadow_data_cursor: Rc<RefCell<ShadowDataCursor>>
     ) {
         ech.push((
             Cow::Owned("body".parse().unwrap()),
             ElementContentHandlers::default().element(move |el| {
-                let data = ShadowData::take_crawl_cursor_at_top(Rc::clone(&cache));
-                if let Ok(data) = data {
-                    let data_formatter_c = Rc::clone(&data_formatter);
-                    let data_c = Rc::clone(&data);
-                    el.on_end_tag(move |end| {
-                        let data_b = data_c.borrow_mut();
-                        let props_html: String = (data_formatter_c)(data_b.to_string());
-                        end.before(props_html.as_str(), ContentType::Html);
-                        Ok(())
-                    })?;
-                    ShadowData::insert_crawl_cursor(Rc::clone(&cache), data); // Put back
-                }
+                let data = Rc::clone(&shadow_data_cursor.borrow().root);
+                let data_formatter_c = Rc::clone(&data_formatter);
+                let data_c = Rc::clone(&data);
+                el.on_end_tag(move |end| {
+                    let data_b = data_c.borrow_mut();
+                    let props_html: String = (data_formatter_c)(data_b.to_string());
+                    end.before(props_html.as_str(), ContentType::Html);
+                    Ok(())
+                })?;
                 Ok(())
             })
         ));
@@ -679,13 +689,12 @@ impl ShadowApi<'_> {
 
     pub fn process_json<W>(
         &self,
-        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>,
         writer : &mut W
     ) -> Result<(), ShadowError>
     where
         W: Write
     {
-        let data = ShadowData::take_crawl_cursor_at_top(Rc::clone(&cache))?;
+        let data = Rc::clone(&self.shadow_data_cursor.borrow().root);
         let data_str = data.borrow().to_string();
         // Write string chunk by chunk
         for chunk in data_str
@@ -695,7 +704,6 @@ impl ShadowApi<'_> {
                     return Err(ShadowError { msg: format!("Error writing to client body : {}",e) });
                 }
             }
-        ShadowData::insert_crawl_cursor(cache, data); // Put back
         Ok(())
     }
 
@@ -703,7 +711,6 @@ impl ShadowApi<'_> {
         &self,
         writer: &mut W,
         chunk_iter: &mut R,
-        cache: Rc<RefCell<HashMap<String, Box<dyn Any>>>>,
         errors: Rc<RefCell<Vec<String>>>
     )
     where
@@ -746,7 +753,6 @@ impl ShadowApi<'_> {
         }
         if as_json {
             if let Err(err) = self.process_json(
-                cache,
                 writer
             ) {
                 errors.borrow_mut().push(format!("[process_json] {}", err.to_string()));
