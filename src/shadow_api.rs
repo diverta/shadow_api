@@ -554,9 +554,14 @@ impl ShadowApi<'_> {
             if create_new_el {
                 if let Some(parent) = parent_array.upgrade() {
                     // Since strong_count was not zero, upgrade should always yield Some
-                    println!("PUSHING ({}) ? {}", current_el.borrow(), create_new_el);
-                    *current_el.borrow_mut() = ShadowData::new_object(Some(selector_id));
-                    parent.borrow_mut().push(Rc::clone(&current_el));
+                    let old_data = current_el.take();
+                    *current_el.borrow_mut() = ShadowData::new_object();
+                    let mut parent_borrowed = parent.borrow_mut();
+                    let parent_arr = parent_borrowed.as_array_mut().unwrap();
+
+                    let last = parent_arr.last_mut().unwrap();
+                    *last = ShadowData::wrap(old_data);
+                    parent_arr.push(Rc::clone(&current_el));
                 }
             }
         }
