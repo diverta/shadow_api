@@ -220,7 +220,7 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
 }
 "##, Rc::clone(&errors))))],));
 
-    let mut shadow_api_o = ShadowApi::new();
+    let mut shadow_api_o = ShadowApi::new(None);
     shadow_api_o.set_data_formatter(Rc::new(Box::new(move |data: String| {
         format!("<script>var my_data = {};</script>", data)
     })));
