@@ -585,7 +585,6 @@ impl ShadowApi<'_> {
                     parent_arr.push(Rc::clone(&current_el));
                 }
             }
-            println!("PREP: {}", current_el.borrow());
         }
     }
 
