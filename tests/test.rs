@@ -225,8 +225,6 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
         format!("<script>var my_data = {};</script>", data)
     })));
 
-    let cache = shadow_api_o.parse(Rc::clone(&json_def), Rc::clone(&errors));
-
     {
         // Testing ShadowJson string transform
         let second_shadowjson = Rc::clone(Rc::clone(&json_def).get(1).unwrap());

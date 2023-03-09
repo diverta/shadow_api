@@ -1,4 +1,5 @@
 use core::fmt;
+use rand::prelude::*;
 use std::{cell::RefCell, rc::{Rc, Weak}};
 
 use indexmap::IndexMap;
@@ -12,9 +13,10 @@ use super::{ShadowError};
 // The reason we don't use serde::json for this is that while serde::json is able to deserialize into Rc (through a feature), RefCells are not supported
 #[derive(Debug)]
 pub struct ShadowData {
-    pub id: Option<usize>,
+    pub id: Option<usize>, // Selector identifier
     pub parent: Weak<RefCell<ShadowData>>,
-    pub v: ShadowDataValue
+    pub v: ShadowDataValue,
+    pub uid: String, // Unique data element identified
 }
 
 #[derive(Debug)]
@@ -26,7 +28,12 @@ pub enum ShadowDataValue {
 
 impl Default for ShadowData {
     fn default() -> Self {
-        ShadowData::new_string(None, Weak::new(), "".to_string())
+        ShadowData {
+            id: None,
+            parent: Weak::new(),
+            uid: String::from("0_0000"),
+            v: ShadowDataValue::String(Rc::new(RefCell::new(String::new())))
+        }
     }
 }
 
@@ -65,14 +72,20 @@ impl ShadowData {
     pub fn wrap(s: Self) -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(s))
     }
+    fn uid(id: Option<usize>) -> String {
+        // Pseudo random internal id for el identification
+        let mut nums: Vec<i32> = (1000..9999).collect();
+        nums.shuffle(&mut rand::thread_rng());
+        format!("{}_{}", id.unwrap_or(0), nums.first().unwrap())
+    }
     pub fn new_string(id: Option<usize>, parent: Weak<RefCell<ShadowData>>, v: String) -> Self {
-        return ShadowData { id, parent, v: ShadowDataValue::String(Rc::new(RefCell::new(v))) };
+        return ShadowData { id, parent, uid: Self::uid(id), v: ShadowDataValue::String(Rc::new(RefCell::new(v))) };
     }
     pub fn new_array(id: Option<usize>, parent: Weak<RefCell<ShadowData>>) -> Self {
-        return ShadowData { id, parent, v: ShadowDataValue::Array(Vec::new()) };
+        return ShadowData { id, parent, uid: Self::uid(id), v: ShadowDataValue::Array(Vec::new()) };
     }
     pub fn new_object(id: Option<usize>, parent: Weak<RefCell<ShadowData>>) -> Self {
-        return ShadowData { id, parent, v: ShadowDataValue::Object(IndexMap::new()) };
+        return ShadowData { id, parent, uid: Self::uid(id), v: ShadowDataValue::Object(IndexMap::new()) };
     }
     pub fn is_string(&self) -> bool {
         return match &self.v {
@@ -257,16 +270,14 @@ impl ShadowData {
 
     // Returns the current Cell 
     pub fn on_data_tag_open(
-        el: &mut Element,
+        _el: &mut Element,
         selector_id: usize,
         json_def: Rc<RefCell<ShadowJson>>,
         cursor: Rc<RefCell<ShadowDataCursor>>
     ) -> Result<Option<Rc<RefCell<ShadowData>>>, ShadowError> {
         if let Some(data_def) = json_def.borrow().data.as_ref() {
             let path = data_def.path.clone();
-            println!("OPEN: {}", el.tag_name());
             let mut cursor = cursor.borrow_mut();
-            println!("DATA: {}", cursor.to_string());
 
             let is_current = {
                 cursor.shadow_data.borrow_mut().id
@@ -278,6 +289,12 @@ impl ShadowData {
             let is_current_an_array = {
                 cursor.shadow_data.borrow_mut().is_array()
             };
+
+            if !is_current && is_current_an_array {
+                // A sibling found along with an iterating array. This case SHOULD only happen if previous sibling defined an array path
+                // Cursor is now pointing at the array of the previous sibling, so we want to go up once
+                cursor.go_up()?;
+            }
 
             if let Some(mut path) = path {
                 // A path is specified => we need to create (or reuse) a deeper element, and overwrite next_data
@@ -296,6 +313,9 @@ impl ShadowData {
 
                 let mut split = path.split('.').peekable();
                 let mut current_data = Rc::clone(&cursor.shadow_data);
+
+                // The contents of this Cell will be changed once we can determine the parent
+                let parent = Rc::downgrade(&current_data);
                 while let Some(word) = split.next() {
                     let current_data_c = Rc::clone(&current_data);
                     let current_ref = Rc::clone(&current_data);
@@ -332,7 +352,6 @@ impl ShadowData {
                                     }
                                 }
                             };
-
                             let parent_array = Rc::downgrade(&data_array); // Creating weak reference to parent array
                             let new_data = ShadowData::wrap(ShadowData::new_object(Some(selector_id), parent_array));
                             *cursor = ShadowDataCursor::new(Rc::clone(&new_data), Rc::clone(&cursor.root)); // Next data is now pointing to the first (empty) object of the array
@@ -345,7 +364,7 @@ impl ShadowData {
                             } else {
                                 // This is the first time this nested object is reached : create data
                                 let new_data = ShadowData::wrap(ShadowData::new_object(
-                                    Some(selector_id), Rc::downgrade(&current_ref)
+                                    Some(selector_id), Weak::clone(&parent)
                                 ));
                                 temp_data.set(word, Rc::clone(&new_data));
                                 *cursor = ShadowDataCursor::new(Rc::clone(&new_data), Rc::clone(&cursor.root));
@@ -358,7 +377,9 @@ impl ShadowData {
                             if let Some(temp_data_existing) = temp_data.get(word) {
                                 current_data = Rc::clone(&temp_data_existing);
                             } else {
-                                let new_temp_data = ShadowData::wrap(ShadowData::new_object(Some(selector_id), Weak::clone(&temp_data.parent)));
+                                let new_temp_data = ShadowData::wrap(ShadowData::new_object(
+                                    Some(selector_id), Weak::clone(&parent)
+                                ));
                                 temp_data.set(word, Rc::clone(&new_temp_data));
                                 current_data = Rc::clone(&new_temp_data);
                             }
@@ -375,24 +396,58 @@ impl ShadowData {
     }
 
     pub fn on_data_tag_close(
-        tag: &mut EndTag,
-        selector_id: usize,
+        _tag: &mut EndTag,
+        _selector_id: usize,
         json_def: Rc<RefCell<ShadowJson>>,
         cursor: Rc<RefCell<ShadowDataCursor>>
     ) -> Result<(), ShadowError> {
         if let Some(data_def) = json_def.borrow().data.as_ref() {
             if data_def.path.as_ref().is_some() {
-                let mut cursor = cursor.borrow_mut();
-                // If a path is defined, then a new nested element must had been added => go up the tree once
-                let parent_weak = Weak::clone(&cursor.shadow_data.borrow().parent);
-                if let Some(parent) = parent_weak.upgrade() {
-                    *cursor = ShadowDataCursor::new(parent, Rc::clone(&cursor.root));
-                } else {
-                    return Err(ShadowError {
-                        msg: format!("on_data_tag_close[{}|{}]: No parent. Cannot move up the tree", tag.name(), selector_id)
-                    });
-                }            }
+                // A path had been defined : after finishing with this element, go back up
+                cursor.borrow_mut().go_up()?;
+            }
         }
         Ok(())
+    }
+
+    pub fn visualize(&self, tabs: usize) -> String {
+        let tab = "  ";
+        let tabs_str = tab.repeat(tabs);
+        match &self.v {
+            ShadowDataValue::String(s) => format!("#{} ^ {} \"{}\"",
+                self.uid,
+                self.parent.upgrade().unwrap_or_default().borrow().uid,
+                s.borrow()
+            ),
+            ShadowDataValue::Array(a) => {
+                format!("#{} ^ {} [\n{}{}\n{}]",
+                    self.uid,
+                    self.parent.upgrade().unwrap_or_default().borrow().uid,
+                    tab.repeat(tabs+1),
+                    a.iter().fold(String::new(), |mut acc, s| {
+                        if acc.len() > 0 {
+                            acc.push_str(&format!(",\n{}", tab.repeat(tabs+1)));
+                        }
+                        acc.push_str(&s.borrow().visualize(tabs + 1));
+                        acc
+                    }),
+                    tabs_str
+                )
+            },
+            ShadowDataValue::Object(o) => {
+                format!("#{} ^ {} {{{}\n{}}}",
+                    self.uid,
+                    self.parent.upgrade().unwrap_or_default().borrow().uid,
+                    o.iter().fold(String::new(), |mut acc, (k,v)| {
+                        if acc.len() > 0 {
+                            acc.push_str(",");
+                        }
+                        acc.push_str(&format!("\n{}{}: {}", tab.repeat(tabs+1), k, v.borrow().visualize(tabs + 1)));
+                        acc
+                    }),
+                    tabs_str
+                )
+            }
+        }
     }
 }

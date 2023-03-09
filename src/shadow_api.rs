@@ -388,9 +388,9 @@ impl ShadowApi<'_> {
                             selector_id,
                             Rc::clone(&json_def_c),
                             Rc::clone(&shadow_data_cursor)
-                        );
+                        )?;
                         Ok(())
-                    });
+                    })?;
                     let self_weak = Rc::downgrade(&data_item);
                     let data_def = json_def_b.data.as_ref().unwrap(); // This should only be reached if data field had been set for this el
                     if let Some(values) = &data_def.values {
@@ -547,42 +547,6 @@ impl ShadowApi<'_> {
             }
         }
         None
-    }
-
-    fn prepare_array_element(
-        selector_id: usize,
-        current_el: Rc<RefCell<ShadowData>>,
-        key: &String
-    ) {
-        /*
-        if parent_array.strong_count() > 0 {
-            // The parent array exists, meaning that new_data_init is an element of the array.
-            // We need to decide if we should modify the current element, or to append a new one (and repoint new_data_init to it)
-            // This decision will be based on the existence of a value with the same key - if yes, it is *most likely* a new selector match
-            let create_new_el: bool = {
-                let new_data_m = current_el.borrow_mut();
-                if let Some(new_data_obj) = new_data_m.as_object() {
-                    // This should always be the case
-                    new_data_obj.contains_key(key)
-                } else {
-                    false
-                }
-            };
-            if create_new_el {
-                if let Some(parent) = parent_array.upgrade() {
-                    // Since strong_count was not zero, upgrade should always yield Some
-                    let old_data = current_el.take();
-                    *current_el.borrow_mut() = ShadowData::new_object();
-                    let mut parent_borrowed = parent.borrow_mut();
-                    let parent_arr = parent_borrowed.as_array_mut().unwrap();
-
-                    let last = parent_arr.last_mut().unwrap();
-                    *last = ShadowData::wrap(old_data);
-                    parent_arr.push(Rc::clone(&current_el));
-                }
-            }
-        }
-        */
     }
 
     fn text_content_handler(
