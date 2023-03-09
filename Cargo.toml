@@ -10,3 +10,4 @@ serde_path_to_error = "0.1"
 lol_html = "0.3.1"
 indexmap = {version = "1.9.1", features = ["serde-1"]}
 regex = "1.7.1"
+rand = "0.8.5"

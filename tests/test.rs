@@ -225,8 +225,6 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
         format!("<script>var my_data = {};</script>", data)
     })));
 
-    shadow_api_o.parse(Rc::clone(&json_def), Rc::clone(&errors));
-
     {
         // Testing ShadowJson string transform
         let second_shadowjson = Rc::clone(Rc::clone(&json_def).get(1).unwrap());
@@ -240,9 +238,13 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
 
     let chunk_size = 50;
     let mut bytes = html_source.as_bytes().chunks(chunk_size).map(|c| { Ok(c.to_vec())});
-    shadow_api_o.process_html(&mut output, &mut bytes, Rc::clone(&errors));
+    shadow_api_o.process_html(
+        &mut output,
+        &mut bytes,
+        Rc::clone(&errors)
+    );
 
-    println!("Erros: {:#?}", errors);
+    println!("Errors: {:#?}", errors);
     assert_eq!(Rc::clone(&errors).borrow().len(), 0);
 
     let bytes = output.into_inner().unwrap_or_default();
