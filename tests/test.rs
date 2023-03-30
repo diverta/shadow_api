@@ -234,11 +234,13 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
         });
     }
 
+    shadow_api_o.parse(json_def, Rc::clone(&errors));
+
     let mut output = BufWriter::new(Vec::new());
 
-    let chunk_size = 50;
+    let chunk_size = 100;
     let mut bytes = html_source.as_bytes().chunks(chunk_size).map(|c| { Ok(c.to_vec())});
-    shadow_api_o.process_html(
+    shadow_api_o.process_html_iter(
         &mut output,
         &mut bytes,
         Rc::clone(&errors)
@@ -297,7 +299,7 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
         <a href="coll2_link2">Coll2 Title2</a>
     </div>
   </div>
-<script>var my_data = {"top_link":{"url":"https://top.link","name":"New Top Link"},"formdata":{"text_key":"text_val","radio_key":"radio_val_checked","checkbox_key":["1","3"],"select_key":"select_val2"},"to_delete":[{"contents":"Third item to be deleted"},{"contents":"Third item to be deleted"},{"contents":"Third item to be deleted"}],"coll1":[{"href":"coll1_link2","name":"Coll1 Title2"},{"href":"coll1_link2","name":"Coll1 Title2"}],"coll2":[{"href":"coll2_link2","name":"Coll2 Title2"},{"href":"coll2_link2","name":"Coll2 Title2"}]};</script></body>
+<script>var my_data = {"top_link":{"url":"https://top.link","name":"New Top Link"},"to_delete":[{"contents":"First item to be deleted"},{"contents":"Second item to be deleted"},{"contents":"Third item to be deleted"}],"formdata":{"text_key":"text_val","radio_key":"radio_val_checked","checkbox_key":["1","3"],"select_key":"select_val2"},"coll1":[{"href":"coll1_link1","name":"Coll1 Title1"},{"href":"coll1_link2","name":"Coll1 Title2"}],"coll2":[{"href":"coll2_link1","name":"Coll2 Title1"},{"href":"coll2_link2","name":"Coll2 Title2"}]};</script></body>
 </html>"##;
 
     assert_eq!(processed_html,expected_html_output);
