@@ -32,3 +32,11 @@ impl From<String> for ShadowError {
         }
     }
 }
+
+impl From<std::io::Error> for ShadowError {
+    fn from(msg: std::io::Error) -> Self {
+        ShadowError {
+            msg: msg.to_string(),
+        }
+    }
+}

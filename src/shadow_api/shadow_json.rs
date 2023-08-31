@@ -1,9 +1,9 @@
-use std::cell::{RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::str;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::fmt::{Debug};
+use std::fmt::Debug;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "source", content = "name")]

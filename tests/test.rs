@@ -1,4 +1,4 @@
-use std::io::{BufWriter};
+use std::io::BufWriter;
 use std::{rc::Rc, cell::RefCell};
 use shadow_api::ShadowJson;
 use shadow_api::ShadowApi;
@@ -220,6 +220,8 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
 }
 "##, Rc::clone(&errors))))],));
 
+
+    let mut output = BufWriter::new(Vec::new());
     let mut shadow_api_o = ShadowApi::new(None);
     shadow_api_o.set_data_formatter(Rc::new(Box::new(move |data: String| {
         format!("<script>var my_data = {};</script>", data)
@@ -236,8 +238,6 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
 
     shadow_api_o.parse(json_def, Rc::clone(&errors));
 
-    let mut output = BufWriter::new(Vec::new());
-
     let chunk_size = 100;
     let mut bytes = html_source.as_bytes().chunks(chunk_size).map(|c| { Ok(c.to_vec())});
     shadow_api_o.process_html_iter(
@@ -245,6 +245,7 @@ let json_def: Rc<Vec<Rc<RefCell<ShadowJson>>>> = Rc::new(Vec::from([
         &mut bytes,
         Rc::clone(&errors)
     );
+    drop(shadow_api_o);
 
     println!("Errors: {:#?}", errors);
     assert_eq!(Rc::clone(&errors).borrow().len(), 0);

@@ -11,11 +11,11 @@
 //! It is recommended that the steps 1,2 and 3 are done while waiting for the backend response (using `Fastly::Request::send_async` for example) - especially if ShadowJson is fetched through another API.
 
 use std::any::Any;
-use std::cell::{RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Write, Read};
 use std::rc::{Rc, Weak};
-use std::borrow::{Cow};
+use std::borrow::Cow;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use indexmap::IndexMap;
@@ -26,6 +26,10 @@ mod shadow_error;
 mod shadow_data;
 mod shadow_data_cursor;
 mod shadow_json;
+mod shadow_api_rewriter;
+
+#[cfg(feature = "async")]
+mod shadow_api_async;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -33,6 +37,7 @@ pub use shadow_error::ShadowError;
 pub use shadow_data::ShadowData;
 pub use shadow_json::ShadowJson;
 pub use shadow_data_cursor::ShadowDataCursor;
+pub use shadow_api_rewriter::ShadowApiRewriter;
 use shadow_json::ShadowJsonValueSource;
 
 const MAX_CHUNK_BYTESIZE: usize = 8096;
@@ -673,17 +678,17 @@ impl<'h> ShadowApi<'h> {
         Ok(())
     }
 
-    pub fn finalize_rewriter<'a, W: Write>(
+    pub fn finalize_rewriter<W: Write>(
         &self,
-        writer: &'a mut W,
+        writer: &'h mut W,
         errors: Rc<RefCell<Vec<String>>>
-    ) -> HtmlRewriter<impl OutputSink + 'a>
+    ) -> ShadowApiRewriter<'h, impl OutputSink + 'h>
     {
         let ech = self.ech.take(); // This is the last time we use ech, so we can remove it
         let as_json = self.options.and_then(|opts| Some(opts.as_json)).unwrap_or(false);
         let max_byte_chunksize = self.max_chunk_bytesize;
         
-        HtmlRewriter::new(
+        let rewriter = HtmlRewriter::new(
             Settings {
                 element_content_handlers: ech,
                 ..Settings::default()
@@ -699,28 +704,74 @@ impl<'h> ShadowApi<'h> {
                     // Discard HTML data, no write
                 }
             }
+        );
+        ShadowApiRewriter::new(rewriter)
+    }
+
+    #[cfg(feature = "async")]
+    pub fn finalize_rewriter_async<W>(
+        &self,
+        writer: std::pin::Pin<&'h mut W>
+    ) -> self::shadow_api_async::ShadowApiRewriterAsync<'h, W>
+    where
+        W: futures::AsyncWrite + Unpin
+    {
+        use self::shadow_api_async::ShadowApiRewriterAsync;
+        let as_json = self.options.and_then(|opts| Some(opts.as_json)).unwrap_or(false);
+
+        ShadowApiRewriterAsync::new(
+            Settings {
+                element_content_handlers: self.ech.take(), // This is the last time we use ech, so we can remove it
+                ..Settings::default()
+            },
+            writer,
+            as_json
         )
     }
 
-    // Process providing just the reader, and use shadowapi's default chunk size
-    pub fn process_html<W, R>(
+    #[cfg(feature = "async")]
+    pub async fn process_json_async<W>(
         &self,
-        writer: &mut W,
+        mut writer: std::pin::Pin<&'h mut W>
+    ) -> Result<(), ShadowError>
+    where
+        W: futures::AsyncWrite + Unpin
+    {
+        use futures::AsyncWriteExt;
+
+        let data = Rc::clone(&self.shadow_data_cursor.borrow().root);
+        let data_str = data.borrow().to_string();
+        // Write string chunk by chunk
+        for chunk in data_str
+            .bytes().collect::<Vec<u8>>()
+            .chunks(self.max_chunk_bytesize) {
+                if let Err(e) = writer.write(chunk).await {
+                    return Err(ShadowError { msg: format!("Error writing to client body : {}",e) });
+                }
+            }
+        Ok(())
+    }
+
+    // Process providing just the reader, and use shadowapi's default chunk size
+    pub fn process_html<'w, W, R>(
+        &self,
+        writer: &'w mut W,
         reader: &mut R,
         errors: Rc<RefCell<Vec<String>>>
     )
     where
         W: Write,
-        R: Read
+        R: Read,
+        'w: 'h
     {
         let as_json = self.options.and_then(|opts| Some(opts.as_json)).unwrap_or(false);
-        let mut rewriter = self.finalize_rewriter(writer, Rc::clone(&errors));
+        let mut shadow_api_rewriter = self.finalize_rewriter(writer, Rc::clone(&errors));
         let mut buf: [u8; MAX_CHUNK_BYTESIZE] = [0; MAX_CHUNK_BYTESIZE];
         loop {
             match reader.read(&mut buf) {
                 Ok(n_bytes) => {
                     if n_bytes > 0 {
-                        if let Err(err) =  rewriter.write(&buf[0..n_bytes]) {
+                        if let Err(err) =  std::io::Write::write(&mut shadow_api_rewriter, &buf[0..n_bytes]) {
                             errors.borrow_mut().push(format!("[process_html] write err : {}", err.to_string()));
                         }
                     } else {
@@ -732,22 +783,22 @@ impl<'h> ShadowApi<'h> {
                 },
             }
         }
-        if let Err(err) = rewriter.end() {
-            errors.borrow_mut().push(format!("Error ending the rewriter : {}", err.to_string()));
-        }
         if as_json {
             if let Err(err) = self.process_json(
-                writer
+                &mut shadow_api_rewriter
             ) {
                 errors.borrow_mut().push(format!("[process_json] {}", err.to_string()));
             }
+        }
+        if let Err(err) = shadow_api_rewriter.end() {
+            errors.borrow_mut().push(format!("Error ending the rewriter : {}", err.to_string()));
         }
     }
 
     // Process using a chunk iterator instead of a reader, allowing to specify custom bytesize
     pub fn process_html_iter<W, I>(
         &self,
-        writer: &mut W,
+        writer: &'h mut W,
         chunk_iter: &mut I,
         errors: Rc<RefCell<Vec<String>>>
     )
@@ -756,11 +807,11 @@ impl<'h> ShadowApi<'h> {
         I: Iterator<Item = Result<Vec<u8>, std::io::Error>>
     {
         let as_json = self.options.and_then(|opts| Some(opts.as_json)).unwrap_or(false);
-        let mut rewriter = self.finalize_rewriter(writer, Rc::clone(&errors));
+        let mut shadow_api_rewriter = self.finalize_rewriter(writer, Rc::clone(&errors));
 
         for chunk in chunk_iter {
             if let Ok(chunk_data) = chunk {
-                if let Err(e) = rewriter.write(&chunk_data) {
+                if let Err(e) = std::io::Write::write(&mut shadow_api_rewriter, &chunk_data) {
                     errors.borrow_mut().push(format!("[process_html_iter] write error : {}", e));
                     return;
                 }
@@ -769,16 +820,16 @@ impl<'h> ShadowApi<'h> {
                 return;
             }
         }
-        if let Err(err) = rewriter.end() {
-            errors.borrow_mut().push(format!("[process_html_iter] rewriter not ending : {}", err.to_string()));
-            return;
-        }
         if as_json {
             if let Err(err) = self.process_json(
-                writer
+                &mut shadow_api_rewriter
             ) {
                 errors.borrow_mut().push(format!("[process_json] error : {}", err.to_string()));
             }
+        }
+        if let Err(err) = shadow_api_rewriter.end() {
+            errors.borrow_mut().push(format!("[process_html_iter] rewriter not ending : {}", err.to_string()));
+            return;
         }
     }
 }
