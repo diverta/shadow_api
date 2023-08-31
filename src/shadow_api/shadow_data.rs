@@ -7,7 +7,7 @@ use lol_html::html_content::{Element, EndTag};
 
 use crate::{ShadowJson, ShadowDataCursor};
 
-use super::{ShadowError};
+use super::ShadowError;
 
 // ShadowData is a minimalistic tree structure representing json value which contains only Objects, Arrays or Strings, wrapped in Rc<RefCell<T>>
 // The reason we don't use serde::json for this is that while serde::json is able to deserialize into Rc (through a feature), RefCells are not supported
