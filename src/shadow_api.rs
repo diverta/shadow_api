@@ -678,11 +678,11 @@ impl<'h> ShadowApi<'h> {
         Ok(())
     }
 
-    pub fn finalize_rewriter<W: Write>(
+    pub fn finalize_rewriter<'w, W: Write>(
         &self,
-        writer: &'h mut W,
+        writer: &'w mut W,
         errors: Rc<RefCell<Vec<String>>>
-    ) -> ShadowApiRewriter<'h, impl OutputSink + 'h>
+    ) -> ShadowApiRewriter<'h, impl OutputSink + 'w>
     {
         let ech = self.ech.take(); // This is the last time we use ech, so we can remove it
         let as_json = self.options.and_then(|opts| Some(opts.as_json)).unwrap_or(false);
