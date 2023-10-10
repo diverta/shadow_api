@@ -711,7 +711,7 @@ impl<'h> ShadowApi<'h> {
     #[cfg(feature = "async")]
     pub fn finalize_rewriter_async<W>(
         &self,
-        writer: std::pin::Pin<&'h mut W>
+        writer: &'h mut W
     ) -> self::shadow_api_async::ShadowApiRewriterAsync<'h, W>
     where
         W: futures::AsyncWrite + Unpin
