@@ -1,4 +1,5 @@
 use std::{task::{Poll, Context}, rc::Rc, cell::RefCell, pin::Pin};
+use pin_project_lite::pin_project;
 
 use futures::AsyncWrite;
 use lol_html::{Settings, HtmlRewriter, OutputSink};
@@ -20,11 +21,15 @@ impl OutputSink for LoLOutputter {
     }
 }
 
-pub struct ShadowApiRewriterAsync<'h, W> {
-    buffer: Rc<RefCell<Vec<u8>>>,
-    rewriter: HtmlRewriter<'h, LoLOutputter>,
-    writer: Pin<&'h mut W>,
-    no_output: bool
+pin_project! {
+    pub struct ShadowApiRewriterAsync<'h, W> {
+        buffer: Rc<RefCell<Vec<u8>>>,
+        rewriter: HtmlRewriter<'h, LoLOutputter>,
+        #[pin]
+        writer: &'h mut W,
+        no_output: bool,
+        is_write_pending: bool // If the previous poll_write returned Pending, then we don't want to write any more - so this flag helps tracking the state
+    }
 }
 
 impl<'h, W> ShadowApiRewriterAsync<'h, W>
@@ -34,7 +39,7 @@ where
     /// If 'no_output' is set to true, LolHtml processing will still apply on the input, but the output won't be written
     pub fn new(
         settings: Settings<'h, '_>,
-        writer: Pin<&'h mut W>,
+        writer: &'h mut W,
         no_output: bool,
     ) -> Self {
         //let waker = Rc::new(Waker::new());
@@ -55,6 +60,7 @@ where
             rewriter,
             writer,
             no_output,
+            is_write_pending: false
         }
     }
 }
@@ -64,26 +70,32 @@ where
     W: AsyncWrite + Unpin
 {
     fn poll_write(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        // TODO: rewrite buf chunk
-        if let Err(err) = self.rewriter.write(buf) {
-            return Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, format!("[HtmlRewriterError] {}", err))));
-        };
-        let buffer_rc = Rc::clone(&self.buffer);
-        let mut buffer = buffer_rc.borrow_mut();
-        if self.no_output {
+        let this = self.project();
+        if !*this.is_write_pending {
+            if let Err(err) = this.rewriter.write(buf) {
+                return Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, format!("[HtmlRewriterError] {}", err))));
+            };
+        }
+        if *this.no_output {
             Poll::Ready(Ok(0))
         } else {
-            match AsyncWrite::poll_write(Pin::new(&mut self.writer), cx, &buffer) {
+            let buffer_rc = Rc::clone(&this.buffer);
+            let mut buffer = buffer_rc.borrow_mut();
+            match this.writer.poll_write(cx, &buffer) {
                 Poll::Ready(done) => {
+                    *this.is_write_pending = false;
                     // Buffered data dumped
                     buffer.clear();
                     Poll::Ready(done)
                 },
-                Poll::Pending => Poll::Pending,
+                Poll::Pending => {
+                    *this.is_write_pending = true;
+                    Poll::Pending
+                },
             }
         }
     }
