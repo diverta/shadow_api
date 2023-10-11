@@ -387,16 +387,19 @@ impl<'h> ShadowApi<'h> {
             Ok(maybe_data) => {
                 if let Some(data_item) = maybe_data {
                     // Register end tag action immediatly
-                    if el.can_have_content() { // if not, "on_end_tag" throws error
-                        el.on_end_tag(move |end| {
-                            ShadowData::on_data_tag_close(
-                                end,
-                                selector_id,
-                                Rc::clone(&json_def_c),
-                                Rc::clone(&shadow_data_cursor)
-                            )?;
-                            Ok(())
-                        })?;
+                    if el.can_have_content() {
+                        if let Some(handlers) = el.end_tag_handlers() {
+                            // None is returned if the end tag was not found
+                            handlers.push(Box::new(move |end| {
+                                ShadowData::on_data_tag_close(
+                                    end,
+                                    selector_id,
+                                    Rc::clone(&json_def_c),
+                                    Rc::clone(&shadow_data_cursor)
+                                )?;
+                                Ok(())
+                            }));
+                        }
                     }
                     let self_weak = Rc::downgrade(&data_item);
                     let data_def = json_def_b.data.as_ref().unwrap(); // This should only be reached if data field had been set for this el
@@ -647,12 +650,14 @@ impl<'h> ShadowApi<'h> {
                 let data = Rc::clone(&shadow_data_cursor.borrow().root);
                 let data_formatter_c = Rc::clone(&data_formatter);
                 let data_c = Rc::clone(&data);
-                el.on_end_tag(move |end| {
-                    let data_b = data_c.borrow_mut();
-                    let props_html: String = (data_formatter_c)(data_b.to_string());
-                    end.before(props_html.as_str(), ContentType::Html);
-                    Ok(())
-                })?;
+                if let Some(handlers) = el.end_tag_handlers() {
+                    handlers.push(Box::new(move |end| {
+                        let data_b = data_c.borrow_mut();
+                        let props_html: String = (data_formatter_c)(data_b.to_string());
+                        end.before(props_html.as_str(), ContentType::Html);
+                        Ok(())
+                    }));
+                }
                 Ok(())
             })
         ));
