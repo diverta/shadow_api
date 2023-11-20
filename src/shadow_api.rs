@@ -27,6 +27,7 @@ mod shadow_data;
 mod shadow_data_cursor;
 mod shadow_json;
 mod shadow_api_rewriter;
+mod shadow_api_replacer;
 
 #[cfg(feature = "async")]
 mod shadow_api_async;
@@ -38,6 +39,7 @@ pub use shadow_data::ShadowData;
 pub use shadow_json::ShadowJson;
 pub use shadow_data_cursor::ShadowDataCursor;
 pub use shadow_api_rewriter::ShadowApiRewriter;
+pub use shadow_api_replacer::ShadowApiReplacer;
 use shadow_json::ShadowJsonValueSource;
 
 const MAX_CHUNK_BYTESIZE: usize = 8096;
@@ -711,6 +713,19 @@ impl<'h> ShadowApi<'h> {
             }
         );
         ShadowApiRewriter::new(rewriter)
+    }
+
+    pub fn finalize_replacer(
+        &self
+    ) -> ShadowApiReplacer<'h>
+    {
+        let ech = self.ech.take(); // This is the last time we use ech, so we can remove it
+        ShadowApiReplacer::new(
+            Settings {
+                element_content_handlers: ech,
+                ..Settings::default()
+            }
+        )
     }
 
     #[cfg(feature = "async")]
