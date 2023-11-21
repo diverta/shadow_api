@@ -7,3 +7,4 @@ pub use crate::shadow_api::ShadowError;
 pub use crate::shadow_api::ShadowDataCursor;
 pub use crate::shadow_api::ShadowApiOptions;
 pub use crate::shadow_api::ShadowApiRewriter;
+pub use crate::shadow_api::ShadowApiReplacer;
