@@ -58,6 +58,45 @@ pub struct ShadowApiOptions {
     pub as_json: bool,
 }
 
+/// Owned object for initializing ShadowApi which has to be lifetime-tied to it
+pub struct ShadowApiInit {
+    options: Option<ShadowApiOptions>,
+    max_chunk_bytesize: usize,
+    data_formatter: Box<dyn Fn(String) -> String>,
+    json_def: Vec<Rc<RefCell<ShadowJson>>>,
+    errors: Rc<RefCell<Vec<String>>>
+}
+
+impl ShadowApiInit {
+    pub fn new(
+        options: Option<ShadowApiOptions>,
+        max_chunk_bytesize: usize,
+        data_formatter: Box<dyn Fn(String) -> String>,
+        json_def: Vec<Rc<RefCell<ShadowJson>>>,
+        errors: Rc<RefCell<Vec<String>>>
+    ) -> Self {
+        Self {
+            options,
+            max_chunk_bytesize,
+            data_formatter,
+            json_def,
+            errors
+        }
+    }
+
+    /// Consumes ShadowApiInit to generate a ShadowApi bound to the provided lifetime
+    pub fn init<'a>(self) -> ShadowApi<'a> {
+        let mut shadow_api_o = ShadowApi::new(self.options);
+        shadow_api_o.set_max_chunk_bytesize(self.max_chunk_bytesize);
+        shadow_api_o.set_data_formatter(Rc::new(self.data_formatter)); // Define a custom formatter for the generated JSON data
+
+        // Parse aggregated & transformed list of all ShadowJson definitions
+        shadow_api_o.parse(Rc::new(self.json_def), Rc::clone(&self.errors)); // This crawls ShadowJson and builds all element and text content handlers for LOLHTML.
+
+        shadow_api_o
+    }
+}
+
 impl<'h> ShadowApi<'h> {
     pub fn new(options: Option<ShadowApiOptions>) -> Self {
         ShadowApi {

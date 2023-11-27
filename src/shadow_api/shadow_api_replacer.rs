@@ -32,8 +32,13 @@ impl<'h> ShadowApiReplacer<'h> {
         }
     }
 
-    pub fn replace(&'h mut self, chunk: &[u8]) -> Result<(Rc<RefCell<Vec<u8>>>, Rc<RefCell<usize>>), RewritingError> {
+    pub fn replace(&mut self, chunk: &[u8]) -> Result<(Rc<RefCell<Vec<u8>>>, Rc<RefCell<usize>>), RewritingError> {
         self.rewriter.write(chunk)?;
+        Ok((Rc::clone(&self.buffer), Rc::clone(&self.written)))
+    }
+
+    pub fn replace_owned(&mut self, chunk: Vec<u8>) -> Result<(Rc<RefCell<Vec<u8>>>, Rc<RefCell<usize>>), RewritingError> {
+        self.rewriter.write(&chunk)?;
         Ok((Rc::clone(&self.buffer), Rc::clone(&self.written)))
     }
 
