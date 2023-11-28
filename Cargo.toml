@@ -17,3 +17,5 @@ regex = "1.7.1"
 rand = "0.8.5"
 futures = { version = "0.3", optional = true }
 pin-project-lite = { version = "0.2", optional = true }
+
+[dev-dependencies]
