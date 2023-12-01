@@ -40,3 +40,11 @@ impl From<std::io::Error> for ShadowError {
         }
     }
 }
+
+impl From<lol_html::errors::RewritingError> for ShadowError {
+    fn from(value: lol_html::errors::RewritingError) -> Self {
+        ShadowError {
+            msg: value.to_string(),
+        }
+    }
+}
