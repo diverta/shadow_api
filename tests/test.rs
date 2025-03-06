@@ -1,4 +1,4 @@
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::{rc::Rc, cell::RefCell};
 use shadow_api::{ShadowJson, ShadowApiReplacer, ShadowApiInit};
 use shadow_api::ShadowApi;
@@ -18,6 +18,7 @@ fn html_source<'a>() -> &'a str {
 </head>
 <body>
   <div name="match_test">Apple Banana</div>
+  <div name="match_empty"></div>
   <a class="top_link" href="https://top.link" style="display:none">TopLink</a>
   <div class="to_delete">First item to be deleted</div>
   <div id="first">
@@ -70,6 +71,7 @@ fn html_result<'a>() -> &'a str {
 </head>
 <body>
   <div name="match_test">Banana Apple</div>
+  <div name="match_empty">Not empty anymore</div>
   <a class="top_link" href="https://top.link" id="123">New Top Link</a>
   
   <div id="first">
@@ -156,6 +158,15 @@ fn shadow_json_2<'a>() -> &'a str {
                         "op": "match_replace",
                         "match": "(\\S+) (\\S+)",
                         "val": "$2 $1"
+                    }
+                }
+            },
+            {
+                "s": "div[name=\"match_empty\"]",
+                "edit": {
+                    "content": {
+                        "op": "upsert",
+                        "val": "Not empty anymore"
                     }
                 }
             },
@@ -380,6 +391,49 @@ fn test_replacer<'a>() {
             output.extend(replaced_slice[..written].iter());
         });
     }
+    let processed_html_output = String::from_utf8(output).unwrap();
+    assert_eq!(processed_html_output, expected_html_output);
+}
+
+#[test]
+// Test identified issue where content upsert would not work on a node with no previous content (TextContentHandler is not executed)
+fn test_unit_1<'a>() {
+    let html_source: &'a str = "<html><head><title></title></head><body></body></html>";
+
+    let errors: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    let json_def: Vec<Rc<RefCell<ShadowJson>>> = Vec::from([
+        Rc::new(RefCell::new(ShadowJson::parse_str(
+            r##"{
+                "s": "title",
+                "edit": {
+                    "content": {
+                        "op": "upsert",
+                        "val": "Not empty anymore"
+                    }
+                }
+            }"##, Rc::clone(&errors)
+        )))
+    ]);
+
+    let shadow_api_init = ShadowApiInit::new(
+        None,
+        8196,
+        Box::new(|_: String| String::new()),
+        json_def,
+        Rc::clone(&errors)
+    );
+
+    let shadow_api = shadow_api_init.init();
+
+    let mut output: Vec<u8> = Vec::new();
+    let expected_html_output = "<html><head><title>Not empty anymore</title></head><body></body></html>";
+    
+    let source_bytes = html_source.as_bytes();
+
+    let mut shadow_api_rewriter = shadow_api.finalize_rewriter(&mut output, errors);
+    shadow_api_rewriter.write_all(source_bytes).unwrap();
+    drop(shadow_api_rewriter);
+    
     let processed_html_output = String::from_utf8(output).unwrap();
     assert_eq!(processed_html_output, expected_html_output);
 }
