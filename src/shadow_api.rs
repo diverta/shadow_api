@@ -416,6 +416,13 @@ impl<'h> ShadowApi<'h> {
                         }
                     }
                 }
+                if let Some(content) = &edit.content {
+                    // Normally content is handled by text_content_handler, however in a special case where el content is actually empty (not even a single space),
+                    // lolhtml's text handler is not executed at all. So make a potentially redundant content replacement here as well
+                    if content.op == "upsert" && el.can_have_content() && content.val.is_some() {
+                        el.set_inner_content(content.val.as_ref().unwrap().as_str(), ContentType::Text);
+                    }
+                }
             }
         }
 
